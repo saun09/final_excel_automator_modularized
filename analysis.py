@@ -1,8 +1,8 @@
 import pandas as pd
 import streamlit as st
 from data_cleaning import safe_numeric_conversion
-
-
+import calendar
+from dateutil import parser
 
 def group_data(df, group_by_columns, aggregation_rules=None):
     """
@@ -202,3 +202,55 @@ def perform_trade_analysis(df, product_col, quantity_col, value_col, importer_co
     analysis["Average Unit Price by Product"] = unit_price_summary
 
     return analysis
+
+
+
+
+def parse_custom_month_format(date_str):
+    """
+    Converts 'mar--2021' to a datetime object (e.g., 2021-03-01)
+    """
+    try:
+        return pd.to_datetime(date_str.replace('--', '-'), format='%b-%Y')
+    except:
+        return pd.NaT
+
+def get_fy(date):
+    if pd.isnull(date): return None
+    if date.month <= 3:
+        return f"FY {date.year - 1}-{str(date.year)[-2:]}"
+    else:
+        return f"FY {date.year}-{str(date.year + 1)[-2:]}"
+
+
+def full_periodic_analysis(df, date_col, value_col):
+    if date_col not in df.columns or value_col not in df.columns:
+        return None, "Required columns not found"
+
+    df_clean = df.copy()
+    df_clean["_numeric"] = safe_numeric_conversion(df_clean[value_col])
+
+    # Use custom parser for 'Month' column format like 'mar--2021'
+    if df_clean[date_col].str.contains('--', na=False).any():
+        df_clean["Parsed_Date"] = df_clean[date_col].apply(parse_custom_month_format)
+    else:
+        df_clean["Parsed_Date"] = pd.to_datetime(df_clean[date_col], errors="coerce")
+
+    df_clean.dropna(subset=["Parsed_Date"], inplace=True)
+
+    df_clean["Month_Period"] = df_clean["Parsed_Date"].dt.to_period("M").astype(str)
+    df_clean["Quarter"] = df_clean["Parsed_Date"].dt.to_period("Q").astype(str)
+    df_clean["Calendar Year"] = df_clean["Parsed_Date"].dt.year.astype(str)
+    df_clean["Financial Year"] = df_clean["Parsed_Date"].apply(get_fy)
+
+    monthly_avg = df_clean.groupby("Month_Period")["_numeric"].mean().reset_index(name="Monthly Avg")
+    quarterly_avg = df_clean.groupby("Quarter")["_numeric"].mean().reset_index(name="Quarterly Avg")
+    fy_avg = df_clean.groupby("Financial Year")["_numeric"].mean().reset_index(name="FY Avg")
+    cy_avg = df_clean.groupby("Calendar Year")["_numeric"].mean().reset_index(name="CY Avg")
+
+    return {
+        "Monthly Average": monthly_avg,
+        "Quarterly Average": quarterly_avg,
+        "Financial Year Average": fy_avg,
+        "Calendar Year Average": cy_avg
+    }, "✅ All time-based averages computed"
