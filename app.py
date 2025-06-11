@@ -12,7 +12,8 @@ from data_cleaning import (
     convert_to_kg,
     fetch_supported_currencies,
     convert_sheet_to_usd,
-    convert_currency
+    convert_currency,
+    get_conversion_rate
 )
 
 from clustering import (
@@ -47,37 +48,17 @@ if uploaded_file:
     string_cols = detect_string_columns(df)
 
     st.write(f"**Detected string columns (to standardize):** {string_cols}")
-    if st.button("🔁 Convert Units to Kilograms"):
-        df_converted, converted_rows, deleted_rows = convert_to_kg(df.copy())
-        st.session_state['df_converted'] = df_converted
-
-        st.subheader("✅ Converted Data (Units → kg)")
-        st.dataframe(df_converted.head(10))
-
-        csv_kg = df_converted.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Converted CSV (kg)",
-            data=csv_kg,
-            file_name="converted_to_kg.csv",
-            mime="text/csv"
-    )
-
-        # Show converted rows
-        if converted_rows:
-            st.subheader("🔁 Rows Converted to kg")
-            st.dataframe(pd.DataFrame(converted_rows))
-
-    # Show and log deleted rows
-        if deleted_rows:
-            st.subheader("🗑️ Rows Deleted (Non-Convertible Units)")
-            st.warning("These rows had unrecognized units like '2 pcs', 'hands full', etc. and were removed.")
-            st.dataframe(pd.DataFrame(deleted_rows))
-
     currency_col = st.selectbox("Select the currency column", df.columns)
     value_cols = st.multiselect("Select the columns to convert to USD", df.columns)
+    quantity_col = st.selectbox("Select the quantity column", df.columns)
+    unit_col = st.selectbox("Select the unit column", df.columns)
 
-    if st.button("Convert to USD"):
-        with st.spinner("Converting..."):
+    if st.button("🔁 Convert Units to kg & Currency to USD"):
+        with st.spinner("Converting weight and currency..."):
+            # --- Step 1: Unit Conversion ---
+            df_weight, converted_rows, deleted_rows = convert_to_kg(df.copy())
+
+            # --- Step 2: Currency Conversion ---
             progress_bar = st.progress(0)
             status_text = st.empty()
 
@@ -86,30 +67,45 @@ if uploaded_file:
             def warning_cb(msg): st.warning(msg)
             def success_cb(msg): st.success(msg)
 
-            df_converted = convert_sheet_to_usd(
-                df,
-                currency_col,
-                value_cols,
+            df_final = convert_sheet_to_usd(
+                df_weight,
+                currency_col=currency_col,
+                value_cols=value_cols,
                 progress_callback=progress_cb,
                 status_callback=status_cb,
                 warning_callback=warning_cb,
                 success_callback=success_cb,
             )
 
-        st.subheader("Converted Data")
-        st.dataframe(df_converted.head())
+            # Save to session
+            st.session_state["df_final"] = df_final
 
-        csv = df_converted.to_csv(index=False).encode('utf-8')
-        st.download_button("Download Converted CSV", csv, "converted_data.csv", "text/csv")
+        st.success("✅ All conversions complete!")
+        st.subheader("Final Converted Data")
+        st.dataframe(df_final.head(10))
+
+        # Show summaries
+        if converted_rows:
+            st.subheader("🔁 Rows Converted to kg")
+            st.dataframe(pd.DataFrame(converted_rows))
+
+        if deleted_rows:
+            st.subheader("🗑️ Rows Deleted (Non-Convertible Units)")
+            st.warning("These rows had unrecognized units and were removed.")
+            st.dataframe(pd.DataFrame(deleted_rows))
+
+        # Download single CSV
+        csv_final = df_final.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Final Converted CSV", csv_final, "converted_data.csv", "text/csv")
 
 # Optional API Test
-if st.sidebar.button("Test API Connection"):
-    st.sidebar.write("Testing API...")
-    rate = get_conversion_rate("EUR")
-    if rate:
-        st.sidebar.success(f"1 EUR = ${rate} USD")
-    else:
-        st.sidebar.error("API Connection Failed")
+#if st.sidebar.button("Test API Connection"):
+ #   st.sidebar.write("Testing API...")
+  #  rate = get_conversion_rate("EUR")
+   # if rate:
+    #    st.sidebar.success(f"1 EUR = ${rate} USD")
+    #else:
+     #   st.sidebar.error("API Connection Failed") """
 
 
     if st.button("Standardize String Columns"):

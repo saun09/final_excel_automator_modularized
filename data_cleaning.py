@@ -265,8 +265,11 @@ def convert_sheet_to_usd(df, currency_col, value_cols, progress_callback=None, s
     for idx, row in df.iterrows():
         currency = str(row[currency_col]).strip().upper()
 
+        
+        progress = min((idx + 1) / total_rows, 1.0)
         if progress_callback:
-            progress_callback((idx + 1) / total_rows)
+            progress_callback(progress)
+
         if status_callback:
             status_callback(f"Processing row {idx + 1} of {total_rows}")
 
