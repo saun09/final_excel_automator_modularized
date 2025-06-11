@@ -167,7 +167,6 @@ if 'df_clustered' in st.session_state:
             file_name="clustered_data_colored.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
 # ------------------------ ANALYTICS ------------------------
 if 'df_clustered' in st.session_state:
     df_clustered = st.session_state["df_clustered"]
@@ -175,7 +174,7 @@ if 'df_clustered' in st.session_state:
 
     st.subheader("📈 Data Analytics & Insights")
 
-    # --- NEW: Trade Filters Section ---
+    # --- Trade Filters Section ---
     with st.expander("🌍 Filter Trade Data"):
         def clean_list(series):
             return sorted(set(s.strip().lower() for s in series.dropna().unique() if isinstance(s, str)))
@@ -195,8 +194,7 @@ if 'df_clustered' in st.session_state:
         selected_importer = st.selectbox("Filter by Importer Country", ["None"] + importer_options)
         selected_supplier = st.selectbox("Filter by Supplier Country", ["None"] + supplier_options)
 
-
-    from analysis import filter_trade_data
+   
 
     filtered_df = filter_trade_data(
         df_clustered.copy(),
@@ -207,7 +205,8 @@ if 'df_clustered' in st.session_state:
         selected_importer if selected_importer != "None" else None,
         selected_supplier if selected_supplier != "None" else None
     )
-    # 🔎 Show selected filters and filtered data preview
+
+    # Selected Filters
     st.markdown("### 🔎 Selected Filters")
     st.write(f"**Trade Type:** {selected_trade_type or 'All'}")
     st.write(f"**Importer Country:** {selected_importer or 'All'}")
@@ -218,136 +217,177 @@ if 'df_clustered' in st.session_state:
         st.dataframe(filtered_df)
         csv_filtered = filtered_df.to_csv(index=False).encode("utf-8")
         st.download_button("📥 Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
+
+        st.markdown("### 📊 Trade Data Analysis")
+
+        string_cols = filtered_df.select_dtypes(include='object').columns.tolist()
+        numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
+
+        st.write("String Columns:", string_cols)
+        st.write("Numeric Columns:", numeric_cols)
+
+        if string_cols and numeric_cols:
+            product_col = st.selectbox("Select Product Column", string_cols)
+            quantity_col = st.selectbox("Select Quantity Column", numeric_cols)
+            value_col = st.selectbox("Select Value Column", numeric_cols)
+            importer_col = st.selectbox("Select Importer Column", string_cols)
+            supplier_col = st.selectbox("Select Supplier Column", string_cols)
+
+            from analysis import perform_trade_analysis
+            try:
+                analysis_results = perform_trade_analysis(
+                    filtered_df,
+                    product_col,
+                    quantity_col,
+                    value_col,
+                    importer_col,
+                    supplier_col
+                )
+            except Exception as e:
+                st.error(f"❌ Error during trade analysis: {e}")
+                st.stop()
+
+            if "error" in analysis_results:
+                st.error(analysis_results["error"])
+            else:
+                for section, df_section in analysis_results.items():
+                    st.subheader(section)
+                    st.dataframe(df_section)
+                    if not df_section.empty:
+                        st.bar_chart(df_section.set_index(df_section.columns[0]))
+        else:
+            st.warning("⚠️ Not enough string or numeric columns in the filtered data.")
+
+    
+
+        numeric_cols = detect_numeric_columns(filtered_df)
+        categorical_cols = detect_categorical_columns(filtered_df)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Numeric Columns:**")
+            st.write(numeric_cols or "None")
+        with col2:
+            st.write("**Categorical Columns:**")
+            st.write(categorical_cols or "None")
+
+        analysis_type = st.selectbox(
+            "Select Analysis Type:",
+            ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"],
+            format_func=lambda x: {
+                "cluster_summary": "📈 Cluster Summary",
+                "top_clusters": "🏆 Top Clusters",
+                "cluster_by_category": "📊 Cross-Analysis",
+                "detailed_breakdown": "🔍 Full Breakdown"
+            }[x]
+        )
+
+        target_col = None
+        group_by_col = None
+
+        if numeric_cols:
+            target_col = st.selectbox("Select numeric column:", ["None"] + numeric_cols)
+            target_col = None if target_col == "None" else target_col
+
+        if analysis_type in ["cluster_by_category", "detailed_breakdown"] and categorical_cols:
+            group_by_col = st.selectbox("Group by column:", categorical_cols)
+
+        selected_clusters = st.multiselect("Filter Clusters:", sorted(filtered_df[cluster_col].unique()), default=[])
+
+        if st.button("🔍 Run Analysis"):
+            with st.spinner("Analyzing..."):
+                result, message = perform_cluster_analysis(
+                    filtered_df,
+                    cluster_col,
+                    analysis_type,
+                    target_col,
+                    group_by_col,
+                    selected_clusters or None
+                )
+
+                if result is not None:
+                    st.success(message)
+                    st.subheader("Analysis Results")
+                    st.dataframe(result)
+                    csv_results = result.to_csv(index=False).encode("utf-8")
+                    st.download_button("📥 Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
+                else:
+                    st.error(f"Error: {message}")
+
+            st.markdown("---")
+
+        # Business Questions
+        st.subheader("🧠 Business Questions")
+
+        question = st.selectbox("What do you want to analyze?", [
+            "Top Exporter Companies",
+            "Top Importer Companies",
+            "Most Traded Product",
+            "Average Unit Price in Month",
+            "Top Exporter Countries to Importer"
+        ])
+
+        if "product" in filtered_df.columns and question in [
+            "Most Traded Product", "Average Unit Price in Month", "Top Exporter Countries to Importer"
+        ]:
+            product_options = sorted(set(filtered_df["product"].dropna().astype(str)))
+            selected_product = st.selectbox("Select a Product", product_options)
+        else:
+            selected_product = None
+
+        if "month" in filtered_df.columns and question == "Average Unit Price in Month":
+            month_options = sorted(set(filtered_df["month"].dropna().astype(str)))
+            selected_month = st.selectbox("Select Month", month_options)
+        else:
+            selected_month = None
+
+        if st.button("📌 Get Insight"):
+            with st.spinner("Processing your request..."):
+                result_df = None
+
+                try:
+                    if question == "Top Exporter Companies":
+                        result_df = filtered_df[supplier_country_col].value_counts().head(10).reset_index()
+                        result_df.columns = ['Exporter Company', 'Export Count']
+
+                    elif question == "Top Importer Companies":
+                        result_df = filtered_df[importer_country_col].value_counts().head(10).reset_index()
+                        result_df.columns = ['Importer Company', 'Import Count']
+
+                    elif question == "Most Traded Product":
+                        result_df = filtered_df[filtered_df["product"].str.contains(selected_product, case=False, na=False)]
+                        result_df = result_df["product"].value_counts().reset_index().head(10)
+                        result_df.columns = ["Product", "Trade Count"]
+
+                    elif question == "Average Unit Price in Month":
+                        price_df = filtered_df[
+                            filtered_df["product"].str.contains(selected_product, case=False, na=False) &
+                            filtered_df["month"].str.lower().str.contains(selected_month.lower())
+                        ]
+                        if not price_df.empty and "unit_price" in price_df.columns:
+                            avg_price = price_df["unit_price"].astype(float).mean()
+                            st.success(f"📊 Average Unit Price of {selected_product} in {selected_month}: **{avg_price:.2f} USD/unit**")
+                        else:
+                            st.warning("No relevant data found for that product and month.")
+
+                    elif question == "Top Exporter Countries to Importer":
+                        filtered = filtered_df[
+                            (filtered_df[importer_country_col].str.lower() == "india") & 
+                            (filtered_df["product"].str.contains(selected_product, case=False, na=False))
+                        ]
+                        result_df = filtered[supplier_country_col].value_counts().reset_index().head(10)
+                        result_df.columns = ["Supplier Country", "Export Count"]
+
+                    if result_df is not None:
+                        st.subheader("📋 Insight Result")
+                        st.dataframe(result_df)
+                        st.download_button(
+                            "📥 Download Results",
+                            result_df.to_csv(index=False).encode("utf-8"),
+                            "business_question_results.csv",
+                            "text/csv"
+                        )
+                except Exception as e:
+                    st.error(f"⚠️ Error while processing question: {e}")
     else:
         st.warning("⚠️ No data matches the selected filters.")
-
-    # Continue with analytics on filtered data
-    numeric_cols = detect_numeric_columns(filtered_df)
-    categorical_cols = detect_categorical_columns(filtered_df)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("**Numeric Columns:**")
-        st.write(numeric_cols or "None")
-    with col2:
-        st.write("**Categorical Columns:**")
-        st.write(categorical_cols or "None")
-
-    analysis_type = st.selectbox(
-        "Select Analysis Type:",
-        ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"],
-        format_func=lambda x: {
-            "cluster_summary": "📈 Cluster Summary",
-            "top_clusters": "🏆 Top Clusters",
-            "cluster_by_category": "📊 Cross-Analysis",
-            "detailed_breakdown": "🔍 Full Breakdown"
-        }[x]
-    )
-
-    target_col = None
-    group_by_col = None
-
-    if numeric_cols:
-        target_col = st.selectbox("Select numeric column:", ["None"] + numeric_cols)
-        target_col = None if target_col == "None" else target_col
-
-    if analysis_type in ["cluster_by_category", "detailed_breakdown"] and categorical_cols:
-        group_by_col = st.selectbox("Group by column:", categorical_cols)
-
-    selected_clusters = st.multiselect("Filter Clusters:", sorted(filtered_df[cluster_col].unique()), default=[])
-
-    if st.button("🔍 Run Analysis"):
-        with st.spinner("Analyzing..."):
-            result, message = perform_cluster_analysis(
-                filtered_df,
-                cluster_col,
-                analysis_type,
-                target_col,
-                group_by_col,
-                selected_clusters or None
-            )
-
-            if result is not None:
-                st.success(message)
-                st.subheader("Analysis Results")
-                st.dataframe(result)
-                csv_results = result.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
-            else:
-                st.error(f"Error: {message}")
-
-        st.markdown("---")
-    st.subheader("🧠 Business Questions")
-
-    question = st.selectbox("What do you want to analyze?", [
-        "Top Exporter Companies",
-        "Top Importer Companies",
-        "Most Traded Product",
-        "Average Unit Price in Month",
-        "Top Exporter Countries to Importer"
-    ])
-
-    # Show product dropdown if applicable
-    if "product" in filtered_df.columns and question in [
-        "Most Traded Product", "Average Unit Price in Month", "Top Exporter Countries to Importer"
-    ]:
-        product_options = sorted(set(filtered_df["product"].dropna().astype(str)))
-        selected_product = st.selectbox("Select a Product", product_options)
-    else:
-        selected_product = None
-
-    # Show month dropdown if applicable
-    if "month" in filtered_df.columns and question == "Average Unit Price in Month":
-        month_options = sorted(set(filtered_df["month"].dropna().astype(str)))
-        selected_month = st.selectbox("Select Month", month_options)
-    else:
-        selected_month = None
-
-    if st.button("📌 Get Insight"):
-        with st.spinner("Processing your request..."):
-            result_df = None
-
-            try:
-                if question == "Top Exporter Companies":
-                    result_df = filtered_df[supplier_country_col].value_counts().head(10).reset_index()
-                    result_df.columns = ['Exporter Company', 'Export Count']
-
-                elif question == "Top Importer Companies":
-                    result_df = filtered_df[importer_country_col].value_counts().head(10).reset_index()
-                    result_df.columns = ['Importer Company', 'Import Count']
-
-                elif question == "Most Traded Product":
-                    result_df = filtered_df[filtered_df["product"].str.contains(selected_product, case=False, na=False)]
-                    result_df = result_df["product"].value_counts().reset_index().head(10)
-                    result_df.columns = ["Product", "Trade Count"]
-
-                elif question == "Average Unit Price in Month":
-                    price_df = filtered_df[
-                        filtered_df["product"].str.contains(selected_product, case=False, na=False) &
-                        filtered_df["month"].str.lower().str.contains(selected_month.lower())
-                    ]
-                    if not price_df.empty and "unit_price" in price_df.columns:
-                        avg_price = price_df["unit_price"].astype(float).mean()
-                        st.success(f"📊 Average Unit Price of {selected_product} in {selected_month}: **{avg_price:.2f} USD/unit**")
-                    else:
-                        st.warning("No relevant data found for that product and month.")
-
-                elif question == "Top Exporter Countries to Importer":
-                    filtered = filtered_df[
-                        (filtered_df[importer_country_col].str.lower() == "india") & 
-                        (filtered_df["product"].str.contains(selected_product, case=False, na=False))
-                    ]
-                    result_df = filtered[supplier_country_col].value_counts().reset_index().head(10)
-                    result_df.columns = ["Supplier Country", "Export Count"]
-
-                if result_df is not None:
-                    st.subheader("📋 Insight Result")
-                    st.dataframe(result_df)
-                    st.download_button(
-                        "📥 Download Results",
-                        result_df.to_csv(index=False).encode("utf-8"),
-                        "business_question_results.csv",
-                        "text/csv"
-                    )
-            except Exception as e:
-                st.error(f"⚠️ Error while processing question: {e}")
