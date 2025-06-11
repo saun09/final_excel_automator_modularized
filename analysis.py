@@ -131,27 +131,23 @@ def perform_cluster_analysis(df, cluster_col, analysis_type, target_col=None, gr
     
     return None, "Unknown analysis type"
 
+def normalize(s):
+    return str(s).strip().lower()
+
 def filter_trade_data(df, trade_type_col, country_col, supplier_col, 
                       selected_trade_type=None, selected_country=None, selected_supplier=None):
-    """
-    Filters data based on trade type, country, and supplier.
+    
+    st.write("### 🔎 Selected Filters")
+    st.write(f"- Trade Type: `{selected_trade_type}`")
+    st.write(f"- Importer Country: `{selected_country}`")
+    st.write(f"- Supplier Country: `{selected_supplier}`")
 
-    Parameters:
-        df: DataFrame
-        trade_type_col: column containing Import/Export type
-        country_col: column containing Importer country
-        supplier_col: column containing Supplier country
-        selected_trade_type: 'Import' or 'Export'
-        selected_country: e.g. 'India'
-        selected_supplier: e.g. 'China'
+    if selected_trade_type and trade_type_col in df.columns:
+        df = df[df[trade_type_col].astype(str).apply(normalize) == normalize(selected_trade_type)]
+    if selected_country and country_col in df.columns:
+        df = df[df[country_col].astype(str).apply(normalize) == normalize(selected_country)]
+    if selected_supplier and supplier_col in df.columns:
+        df = df[df[supplier_col].astype(str).apply(normalize) == normalize(selected_supplier)]
 
-    Returns:
-        Filtered DataFrame
-    """
-    if selected_trade_type:
-        df = df[df[trade_type_col].str.lower() == selected_trade_type.lower()]
-    if selected_country:
-        df = df[df[country_col].str.lower() == selected_country.lower()]
-    if selected_supplier:
-        df = df[df[supplier_col].str.lower() == selected_supplier.lower()]
+    st.success(f"✅ Filtered data shape: {df.shape}")
     return df

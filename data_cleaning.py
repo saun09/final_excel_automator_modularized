@@ -57,6 +57,9 @@ def detect_numeric_columns(df):
                     numeric_count += 1
                 except:
                     pass
+
+            if len(sample_values) == 0:  # Prevent division by zero
+                continue
             
             if numeric_count / len(sample_values) > 0.7:  # 70% numeric-like values
                 numeric_cols.append(col)
@@ -67,6 +70,8 @@ def detect_numeric_columns(df):
 def detect_categorical_columns(df, exclude_clusters=True):
     """Detect columns suitable for grouping/categorization"""
     categorical_cols = []
+    if len(df) == 0:  # Prevent ZeroDivisionError
+        return categorical_cols
     for col in df.columns:
         if exclude_clusters and '_cluster' in col:
             continue
