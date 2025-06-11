@@ -1,5 +1,7 @@
 import pandas as pd
+import streamlit as st
 from data_cleaning import safe_numeric_conversion
+
 
 
 def group_data(df, group_by_columns, aggregation_rules=None):
@@ -128,3 +130,28 @@ def perform_cluster_analysis(df, cluster_col, analysis_type, target_col=None, gr
         return None, f"Analysis error: {str(e)}"
     
     return None, "Unknown analysis type"
+
+def filter_trade_data(df, trade_type_col, country_col, supplier_col, 
+                      selected_trade_type=None, selected_country=None, selected_supplier=None):
+    """
+    Filters data based on trade type, country, and supplier.
+
+    Parameters:
+        df: DataFrame
+        trade_type_col: column containing Import/Export type
+        country_col: column containing Importer country
+        supplier_col: column containing Supplier country
+        selected_trade_type: 'Import' or 'Export'
+        selected_country: e.g. 'India'
+        selected_supplier: e.g. 'China'
+
+    Returns:
+        Filtered DataFrame
+    """
+    if selected_trade_type:
+        df = df[df[trade_type_col].str.lower() == selected_trade_type.lower()]
+    if selected_country:
+        df = df[df[country_col].str.lower() == selected_country.lower()]
+    if selected_supplier:
+        df = df[df[supplier_col].str.lower() == selected_supplier.lower()]
+    return df

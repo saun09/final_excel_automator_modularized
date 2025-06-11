@@ -22,7 +22,9 @@ from clustering import (
 
 from analysis import (
     group_data,
-    perform_cluster_analysis
+    perform_cluster_analysis,
+    filter_trade_data
+    
 )
 
 from export_excel import (
@@ -166,11 +168,49 @@ if 'df_clustered' in st.session_state:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # ------------------------ ANALYTICS ------------------------
+# ------------------------ ANALYTICS ------------------------
+if 'df_clustered' in st.session_state:
+    df_clustered = st.session_state["df_clustered"]
+    cluster_col = f"{st.session_state['cluster_column_name']}_cluster"
+
     st.subheader("📈 Data Analytics & Insights")
 
-    numeric_cols = detect_numeric_columns(df_clustered)
-    categorical_cols = detect_categorical_columns(df_clustered)
+    # --- NEW: Trade Filters Section ---
+    with st.expander("🌍 Filter Trade Data"):
+        def clean_list(series):
+            return sorted(set(s.strip().lower() for s in series.dropna().unique() if isinstance(s, str)))
+
+        trade_type_col = st.selectbox("Select Trade Type Column (e.g. Import/Export)", df_clustered.columns)
+        importer_country_col = st.selectbox("Select Importer Country Column", df_clustered.columns)
+        supplier_country_col = st.selectbox("Select Supplier Country Column", df_clustered.columns)
+
+        def clean_unique_options(series):
+            return sorted(set(str(val).strip().lower().replace(" ,", ",").replace(", ", ",") for val in series.dropna()))
+
+        trade_type_options = clean_unique_options(df_clustered[trade_type_col])
+        importer_options = clean_unique_options(df_clustered[importer_country_col])
+        supplier_options = clean_unique_options(df_clustered[supplier_country_col])
+
+        selected_trade_type = st.selectbox("Filter by Trade Type", ["None"] + trade_type_options)
+        selected_importer = st.selectbox("Filter by Importer Country", ["None"] + importer_options)
+        selected_supplier = st.selectbox("Filter by Supplier Country", ["None"] + supplier_options)
+
+
+    from analysis import filter_trade_data
+
+    filtered_df = filter_trade_data(
+        df_clustered.copy(),
+        trade_type_col,
+        importer_country_col,
+        supplier_country_col,
+        selected_trade_type if selected_trade_type != "None" else None,
+        selected_importer if selected_importer != "None" else None,
+        selected_supplier if selected_supplier != "None" else None
+    )
+
+    # Continue with analytics on filtered data
+    numeric_cols = detect_numeric_columns(filtered_df)
+    categorical_cols = detect_categorical_columns(filtered_df)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -201,12 +241,12 @@ if 'df_clustered' in st.session_state:
     if analysis_type in ["cluster_by_category", "detailed_breakdown"] and categorical_cols:
         group_by_col = st.selectbox("Group by column:", categorical_cols)
 
-    selected_clusters = st.multiselect("Filter Clusters:", sorted(df_clustered[cluster_col].unique()), default=[] or None)
+    selected_clusters = st.multiselect("Filter Clusters:", sorted(filtered_df[cluster_col].unique()), default=[])
 
     if st.button("🔍 Run Analysis"):
         with st.spinner("Analyzing..."):
             result, message = perform_cluster_analysis(
-                df_clustered,
+                filtered_df,
                 cluster_col,
                 analysis_type,
                 target_col,

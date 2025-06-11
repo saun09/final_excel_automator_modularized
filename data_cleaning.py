@@ -115,6 +115,13 @@ def clean_pin(value):
     match = re.search(r'\b(\d{6})\b', value)
     return match.group(1) if match else value
 
+def remove_commas_and_periods(value):
+    """Remove commas and full stops from a string."""
+    if pd.isna(value):
+        return value
+    return re.sub(r'[.,]', '', str(value))
+
+
 
 def standardize_value(val, col_name=""):
     """Standardize a single value for better matching and clustering."""
@@ -133,6 +140,7 @@ def standardize_value(val, col_name=""):
     val_str = val_str.lower()
     val_str = val_str.strip()
     val_str = re.sub(r'\s+', ' ', val_str)
+    val_str = remove_commas_and_periods(val_str)
 
     return val_str
 
