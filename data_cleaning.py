@@ -216,7 +216,7 @@ def convert_to_kg(df):
         })
 
         df.at[idx, quantity_col] = new_quantity
-        df.at[idx, unit_col] = "KGS"
+        df.at[idx, unit_col] = "kgs"
 
     df = df.drop(index=[r["Index"] for r in rows_to_delete])
 

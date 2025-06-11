@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-
 from io import BytesIO
+
 # Import from modularized files
 from data_cleaning import (
     detect_string_columns, 
@@ -29,40 +29,46 @@ from export_excel import (
     create_colored_excel
 )
 
-# Streamlit UI starts here
+# App Title
 st.title("Automatic String Column Standardizer with Clustering")
 
-uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+# File Upload
+if 'df_original' not in st.session_state:
+    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+    if uploaded_file:
+        try:
+            df = pd.read_csv(uploaded_file)
+        except UnicodeDecodeError:
+            uploaded_file.seek(0)
+            df = pd.read_csv(uploaded_file, encoding='ISO-8859-1')
+        
+        st.session_state['df_original'] = df
 
-if uploaded_file:
-    # Read CSV with fallback encoding
-    try:
-        df = pd.read_csv(uploaded_file)
-    except UnicodeDecodeError:
-        uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file, encoding='ISO-8859-1')
-
+# Show uploaded file sample
+if 'df_original' in st.session_state:
+    df = st.session_state['df_original']
     st.subheader("Original Data Sample")
     st.dataframe(df.head(10))
-
+    
     string_cols = detect_string_columns(df)
-
+    st.session_state['string_cols'] = string_cols
+    
     st.write(f"**Detected string columns (to standardize):** {string_cols}")
+    
     currency_col = st.selectbox("Select the currency column", df.columns)
     value_cols = st.multiselect("Select the columns to convert to USD", df.columns)
     quantity_col = st.selectbox("Select the quantity column", df.columns)
     unit_col = st.selectbox("Select the unit column", df.columns)
 
-    if st.button("🔁 Convert Units to kg & Currency to USD"):
-        with st.spinner("Converting weight and currency..."):
-            # --- Step 1: Unit Conversion ---
-            df_weight, converted_rows, deleted_rows = convert_to_kg(df.copy())
-
-            # --- Step 2: Currency Conversion ---
+    if st.button("🧹 Standardize + Convert Units & Currency"):
+        with st.spinner("Standardizing and converting..."):
+            df_clean = standardize_dataframe(df.copy(), string_cols)
+            df_weight, converted_rows, deleted_rows = convert_to_kg(df_clean)
+            
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            def progress_cb(p): progress_bar.progress(p)
+            def progress_cb(p): progress_bar.progress(min(p, 1.0))
             def status_cb(msg): status_text.text(msg)
             def warning_cb(msg): st.warning(msg)
             def success_cb(msg): st.success(msg)
@@ -77,324 +83,142 @@ if uploaded_file:
                 success_callback=success_cb,
             )
 
-            # Save to session
             st.session_state["df_final"] = df_final
+            st.session_state["converted_rows"] = converted_rows
+            st.session_state["deleted_rows"] = deleted_rows
+            st.rerun()
 
-        st.success("✅ All conversions complete!")
-        st.subheader("Final Converted Data")
-        st.dataframe(df_final.head(10))
-
-        # Show summaries
-        if converted_rows:
-            st.subheader("🔁 Rows Converted to kg")
-            st.dataframe(pd.DataFrame(converted_rows))
-
-        if deleted_rows:
-            st.subheader("🗑️ Rows Deleted (Non-Convertible Units)")
-            st.warning("These rows had unrecognized units and were removed.")
-            st.dataframe(pd.DataFrame(deleted_rows))
-
-        # Download single CSV
-        csv_final = df_final.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Download Final Converted CSV", csv_final, "converted_data.csv", "text/csv")
-
-# Optional API Test
-#if st.sidebar.button("Test API Connection"):
- #   st.sidebar.write("Testing API...")
-  #  rate = get_conversion_rate("EUR")
-   # if rate:
-    #    st.sidebar.success(f"1 EUR = ${rate} USD")
-    #else:
-     #   st.sidebar.error("API Connection Failed") """
-
-
-    if st.button("Standardize String Columns"):
-        df_clean = standardize_dataframe(df, string_cols)
-        st.subheader("Standardized Data Sample")
-        st.dataframe(df_clean.head(10))
-
-        # Prepare CSV for download
-        csv = df_clean.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Standardized CSV",
-            data=csv,
-            file_name="standardized_output.csv",
-            mime="text/csv"
-        )
-        
-        # Store standardized data in session state for clustering
-        st.session_state['df_standardized'] = df_clean
-        st.session_state['string_cols'] = string_cols
-
-# Clustering section (only show if standardized data exists)
-if 'df_standardized' in st.session_state:
-    st.subheader("Product Name Clustering")
-    st.write("Select a column to cluster similar product names:")
+# Post-Standardization Pipeline
+if 'df_final' in st.session_state:
+    df_final = st.session_state["df_final"]
+    string_cols = st.session_state.get("string_cols", detect_string_columns(df_final))
     
-    df_std = st.session_state['df_standardized']
-    cluster_column = st.selectbox(
-        "Choose column for clustering:",
-        options=st.session_state['string_cols'],
-        key="cluster_column_select"
+    st.subheader("Final Data Sample")
+    st.dataframe(df_final.head(10))
+
+    converted_rows = st.session_state.get("converted_rows", [])
+    deleted_rows = st.session_state.get("deleted_rows", [])
+
+    if converted_rows:
+        st.subheader("🔁 Rows Converted to kg")
+        st.dataframe(pd.DataFrame(converted_rows))
+
+    if deleted_rows:
+        st.subheader("🗑️ Rows Deleted (Non-Convertible Units)")
+        st.warning("These rows had unrecognized units and were removed.")
+        st.dataframe(pd.DataFrame(deleted_rows))
+
+    # Final CSV download
+    csv_final = df_final.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "📥 Download Final Cleaned + Converted CSV",
+        csv_final,
+        "final_output.csv",
+        "text/csv"
     )
-    
-    if st.button("Create Clusters"):
-        df_clustered = add_cluster_column(df_std, cluster_column)
-        
-        # Store clustered data in session state
-        st.session_state['df_clustered'] = df_clustered
-        st.session_state['cluster_column_name'] = cluster_column
-        
-        st.subheader("Data with Clusters")
-        # Show original, standardized, and clustered columns side by side
-        display_cols = [cluster_column, f"{cluster_column}_cluster"]
-        if cluster_column in df_clustered.columns:
-            st.dataframe(df_clustered[display_cols].head(20))
-        
-        # Show cluster summary
-        cluster_col = f"{cluster_column}_cluster"
-        if cluster_col in df_clustered.columns:
-            cluster_counts = df_clustered[cluster_col].value_counts()
-            st.subheader("Cluster Summary")
-            st.write(f"Total unique clusters: {len(cluster_counts)}")
-            st.dataframe(cluster_counts.head(10).to_frame("Count"))
-        
-        # Download clustered data as CSV
-        csv_clustered = df_clustered.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Data with Clusters (CSV)",
-            data=csv_clustered,
-            file_name="clustered_output.csv",
-            mime="text/csv"
-        )
 
-# Show clustered data and Excel export if clustering has been done
+    # ------------------------ CLUSTERING ------------------------
+    st.subheader("🔗 Product Name Clustering")
+    cluster_column = st.selectbox("Choose column to cluster:", string_cols, key="cluster_column")
+
+    if st.button("Create Clusters"):
+        df_clustered = add_cluster_column(df_final.copy(), cluster_column)
+        st.session_state["df_clustered"] = df_clustered
+        st.session_state["cluster_column_name"] = cluster_column
+        st.rerun()
+
+# Show clustering results
 if 'df_clustered' in st.session_state:
-    df_clustered = st.session_state['df_clustered']
-    cluster_column = st.session_state['cluster_column_name']
-    
-    # Show the clustered data again
-    st.subheader("Clustered Data (Persistent)")
-    display_cols = [cluster_column, f"{cluster_column}_cluster"]
-    st.dataframe(df_clustered[display_cols].head(20))
-    
-    # Show cluster summary
+    df_clustered = st.session_state["df_clustered"]
+    cluster_column = st.session_state["cluster_column_name"]
     cluster_col = f"{cluster_column}_cluster"
+
+    st.subheader("Clustered Data")
+    st.dataframe(df_clustered[[cluster_column, cluster_col]].head(20))
+
     cluster_counts = df_clustered[cluster_col].value_counts()
-    st.write(f"**Total unique clusters:** {len(cluster_counts)}")
-    
-    # Color-Coded Excel Export Section
-    st.subheader("Color-Coded Excel Export")
-    st.write("Generate an Excel file where each cluster is color-coded and grouped together:")
-    
+    st.subheader("Cluster Summary")
+    st.write(f"Total unique clusters: {len(cluster_counts)}")
+    st.dataframe(cluster_counts.head(10).to_frame("Count"))
+
+    csv_clustered = df_clustered.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Data with Clusters (CSV)",
+        data=csv_clustered,
+        file_name="clustered_output.csv",
+        mime="text/csv"
+    )
+
+    # ------------------------ EXCEL EXPORT ------------------------
+    st.subheader("📊 Color-Coded Excel Export")
     if st.button("Generate Color-Coded Excel", key="excel_export"):
         with st.spinner("Creating color-coded Excel file..."):
             excel_data = create_colored_excel(df_clustered, cluster_column)
-            
-            if excel_data:
-                st.session_state['excel_data'] = excel_data
-                st.session_state['excel_ready'] = True
-                st.success("✅ Excel file generated successfully!")
-    
-    # Show download button if Excel is ready
-    if st.session_state.get('excel_ready', False) and 'excel_data' in st.session_state:
+            st.session_state['excel_data'] = excel_data
+            st.session_state['excel_ready'] = True
+            st.success("✅ Excel file generated successfully!")
+
+    if st.session_state.get('excel_ready', False):
         st.download_button(
-            label="📊 Download Color-Coded Excel File",
+            "📥 Download Excel",
             data=st.session_state['excel_data'],
             file_name="clustered_data_colored.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        
-        # Show preview of what the Excel will contain
-        cluster_col = f"{cluster_column}_cluster"
-        preview_data = df_clustered.groupby(cluster_col).size().reset_index(name='Row_Count')
-        st.write("**Excel File Contents:**")
-        st.write("- **Clustered_Data** sheet: All rows grouped by cluster with color coding")
-        st.write("- **Cluster_Summary** sheet: Summary of clusters with counts")
-        st.write("**Cluster Distribution:**")
-        st.dataframe(preview_data.head(10))
 
-    # DATA ANALYTICS SECTION
-    st.subheader("📊 Data Analytics & Insights")
-    st.write("Query your clustered data to get analytical insights:")
-    
-    # Detect column types for better user experience
+    # ------------------------ ANALYTICS ------------------------
+    st.subheader("📈 Data Analytics & Insights")
+
     numeric_cols = detect_numeric_columns(df_clustered)
     categorical_cols = detect_categorical_columns(df_clustered)
-    
-    # Analytics interface
+
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.write("**Available Numeric Columns (for calculations):**")
-        st.write(numeric_cols if numeric_cols else "No numeric columns detected")
-        
+        st.write("**Numeric Columns:**")
+        st.write(numeric_cols or "None")
     with col2:
-        st.write("**Available Categorical Columns (for grouping):**")
-        st.write(categorical_cols if categorical_cols else "No categorical columns detected")
-    
-    # Analysis type selection
+        st.write("**Categorical Columns:**")
+        st.write(categorical_cols or "None")
+
     analysis_type = st.selectbox(
         "Select Analysis Type:",
-        [
-            "cluster_summary",
-            "top_clusters", 
-            "cluster_by_category",
-            "detailed_breakdown"
-        ],
+        ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"],
         format_func=lambda x: {
-            "cluster_summary": "📈 Cluster Summary (Total records, sums, averages)",
-            "top_clusters": "🏆 Top Clusters (Ranked by selected metric)",
-            "cluster_by_category": "📊 Cross-Analysis (Clusters vs Categories)",
-            "detailed_breakdown": "🔍 Detailed Breakdown (Complete analysis by category)"
+            "cluster_summary": "📈 Cluster Summary",
+            "top_clusters": "🏆 Top Clusters",
+            "cluster_by_category": "📊 Cross-Analysis",
+            "detailed_breakdown": "🔍 Full Breakdown"
         }[x]
     )
-    
-    # Dynamic input fields based on analysis type
+
     target_col = None
     group_by_col = None
-    selected_clusters = None
-    
-    if analysis_type in ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"]:
-        if numeric_cols:
-            target_col = st.selectbox(
-                "Select Numeric Column for Calculations (optional):",
-                ["None"] + numeric_cols
-            )
-            target_col = None if target_col == "None" else target_col
-    
-    if analysis_type in ["cluster_by_category", "detailed_breakdown"]:
-        if categorical_cols:
-            group_by_col = st.selectbox(
-                "Group By Column:",
-                categorical_cols
-            )
-    
-    # Cluster selection
-    all_clusters = sorted(df_clustered[cluster_col].unique())
-    selected_clusters = st.multiselect(
-        "Select Specific Clusters (leave empty for all):",
-        all_clusters,
-        default=[]
-    )
-    
-    if not selected_clusters:
-        selected_clusters = None
-    
-    # Run analysis button
-    if st.button("🔍 Run Analysis", key="run_analysis"):
-        with st.spinner("Analyzing data..."):
+
+    if numeric_cols:
+        target_col = st.selectbox("Select numeric column:", ["None"] + numeric_cols)
+        target_col = None if target_col == "None" else target_col
+
+    if analysis_type in ["cluster_by_category", "detailed_breakdown"] and categorical_cols:
+        group_by_col = st.selectbox("Group by column:", categorical_cols)
+
+    selected_clusters = st.multiselect("Filter Clusters:", sorted(df_clustered[cluster_col].unique()), default=[] or None)
+
+    if st.button("🔍 Run Analysis"):
+        with st.spinner("Analyzing..."):
             result, message = perform_cluster_analysis(
-                df_clustered, 
-                cluster_col, 
-                analysis_type, 
-                target_col, 
-                group_by_col, 
-                selected_clusters
+                df_clustered,
+                cluster_col,
+                analysis_type,
+                target_col,
+                group_by_col,
+                selected_clusters or None
             )
-            
+
             if result is not None:
                 st.success(message)
                 st.subheader("Analysis Results")
                 st.dataframe(result)
-                
-                # Download results
-                csv_results = result.to_csv().encode('utf-8')
-                st.download_button(
-                    label="📥 Download Analysis Results",
-                    data=csv_results,
-                    file_name=f"analysis_{analysis_type}.csv",
-                    mime="text/csv"
-                )
-                
-                # Store results in session state
-                st.session_state['analysis_results'] = result
-                st.session_state['analysis_type'] = analysis_type
-                
+                csv_results = result.to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
             else:
-                st.error(f"Analysis failed: {message}")
-    
-    # Quick insights section
-    if 'analysis_results' in st.session_state:
-        st.subheader("💡 Quick Insights")
-        result = st.session_state['analysis_results']
-        analysis_type = st.session_state['analysis_type']
-        
-        if analysis_type == "cluster_summary":
-            st.write(f"**Total Clusters Analyzed:** {len(result)}")
-            if 'Total_Records' in result.columns:
-                st.write(f"**Largest Cluster:** {result['Total_Records'].idxmax()} ({result['Total_Records'].max()} records)")
-            
-            if target_col and f'{target_col}_Total' in result.columns:
-                st.write(f"**Highest {target_col} Total:** {result[f'{target_col}_Total'].idxmax()} ({result[f'{target_col}_Total'].max():,.2f})")
-        
-        elif analysis_type == "top_clusters":
-            st.write(f"**Top Performing Cluster:** {result.index[0]} ({result.iloc[0, 0]:,.2f})")
-            st.write(f"**Bottom Performing Cluster:** {result.index[-1]} ({result.iloc[-1, 0]:,.2f})")
-
-    # DATA GROUPING SECTION
-    st.subheader("📊 Data Grouping")
-    st.write("Group your data by categorical columns to analyze patterns:")
-    
-    # Grouping interface
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Multiselect for grouping columns
-        group_by_cols = st.multiselect(
-            "Select columns to group by:",
-            categorical_cols,
-            default=[]
-        )
-    
-    with col2:
-        # Select numeric column to aggregate (optional)
-        agg_col = st.selectbox(
-            "Select numeric column to aggregate (optional):",
-            ["None"] + numeric_cols,
-            key="agg_col_select"
-        )
-        
-        # Select aggregation function
-        agg_func = st.selectbox(
-            "Select aggregation function:",
-            ["count", "sum", "mean", "median", "min", "max"],
-            disabled=(agg_col == "None"),
-            key="agg_func_select"
-        )
-    
-    # Prepare aggregation rules
-    aggregation_rules = None
-    if agg_col != "None":
-        aggregation_rules = {agg_col: agg_func}
-    
-    if st.button("🔢 Group Data", key="group_data_button"):
-        if not group_by_cols:
-            st.warning("Please select at least one column to group by")
-        else:
-            with st.spinner("Grouping data..."):
-                grouped_df = group_data(df_clustered, group_by_cols, aggregation_rules)
-                
-                st.subheader("Grouped Data Results")
-                st.dataframe(grouped_df.head(50))
-                
-                # Download results
-                csv_grouped = grouped_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Grouped Data",
-                    data=csv_grouped,
-                    file_name="grouped_data.csv",
-                    mime="text/csv"
-                )
-                
-                # Store results in session state
-                st.session_state['grouped_data'] = grouped_df
-                st.session_state['group_by_cols'] = group_by_cols
-                
-                # Show quick summary
-                st.subheader("💡 Quick Insights")
-                st.write(f"Data grouped by: {', '.join(group_by_cols)}")
-                if agg_col != "None":
-                    st.write(f"Aggregated column: {agg_col} ({agg_func})")
-                    st.write(f"Total {agg_col}: {grouped_df[agg_col].sum():,.2f}")
-                st.write(f"Number of groups: {len(grouped_df)}")
+                st.error(f"Error: {message}")
