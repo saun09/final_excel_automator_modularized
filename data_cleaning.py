@@ -1,8 +1,13 @@
 import pandas as pd
 import re
 import unicodedata
+import streamlit as st
+import pandas as pd
+import requests
+from typing import Dict, List, Optional, Tuple
+import time
 
-
+from io import BytesIO
 def is_email(value):
     """Check if a value is a valid email address."""
     email_pattern = re.compile(
@@ -143,3 +148,165 @@ def standardize_dataframe(df, string_cols):
 def convert_df_to_csv_bytes(df):
     """Convert DataFrame to CSV bytes for download."""
     return df.to_csv(index=False).encode('utf-8')
+UNIT_CONVERSIONS_TO_KG = {
+    "g": 0.001,
+    "gram": 0.001,
+    "grams": 0.001,
+    "mg": 0.000001,
+    "ton": 1000,
+    "tons": 1000,
+    "quintal": 100,
+    "lb": 0.453592,
+    "lbs": 0.453592,
+    "pound": 0.453592,
+    "ounces": 0.0283495,
+    "oz": 0.0283495,
+    "kg": 1,
+    "kgs": 1,
+    "mts": 1000,
+    "metric ton": 1000
+}
+
+
+def is_convertible_unit(unit):
+    """Returns True if the unit is convertible to kg."""
+    unit = str(unit).lower().strip()
+    return unit in UNIT_CONVERSIONS_TO_KG
+
+def extract_numeric_quantity(val):
+    """Extract leading numeric value from a string (e.g., '2 pcs' -> 2.0)."""
+    if pd.isna(val):
+        return None
+    match = re.match(r'^\s*(\d+(?:\.\d+)?)', str(val))
+    return float(match.group(1)) if match else None
+
+def convert_to_kg(df):
+    unit_col = "UQC"
+    quantity_col = "Quantity"
+
+    changed_rows = []
+    rows_to_delete = []
+
+    for idx, row in df.iterrows():
+        raw_unit = row[unit_col]
+        raw_quantity = row[quantity_col]
+
+        unit = standardize_value(raw_unit, unit_col)
+        quantity = extract_numeric_quantity(raw_quantity)
+
+        if pd.isna(unit) or unit not in UNIT_CONVERSIONS_TO_KG or quantity is None:
+            rows_to_delete.append({
+                "Index": idx,
+                "Original Unit": raw_unit,
+                "Original Quantity": raw_quantity
+            })
+            continue
+
+        if unit in ["kg", "kgs"]:
+            continue
+
+        factor = UNIT_CONVERSIONS_TO_KG[unit]
+        new_quantity = quantity * factor
+
+        changed_rows.append({
+            "Index": idx,
+            "Original Unit": raw_unit,
+            "Original Quantity": raw_quantity,
+            "Converted Quantity (kg)": new_quantity
+        })
+
+        df.at[idx, quantity_col] = new_quantity
+        df.at[idx, unit_col] = "KGS"
+
+    df = df.drop(index=[r["Index"] for r in rows_to_delete])
+
+    return df, changed_rows, rows_to_delete
+
+import requests
+import pandas as pd
+
+base_url = "https://marketdata.tradermade.com/api/v1/convert"
+api_key = "-eRFVM6ugO_vKeHx0_Yu"
+
+def convert_currency(amount, from_currency, to_currency):
+    if from_currency == to_currency:
+        return 1.0, amount
+
+    try:
+        url = f"{base_url}?api_key={api_key}&from={from_currency}&to={to_currency}&amount={amount}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            rate = data.get("quote")
+            converted_amount = data.get("total")
+            return rate, converted_amount
+        return None, None
+    except Exception:
+        return None, None
+
+def fetch_supported_currencies():
+    try:
+        url = f"https://marketdata.tradermade.com/api/v1/live_currencies_list?api_key={api_key}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            currencies_data = response.json()
+            if "available_currencies" in currencies_data:
+                currencies = currencies_data["available_currencies"]
+                return list(currencies.keys())
+        return None
+    except Exception:
+        return None
+
+def convert_sheet_to_usd(df, currency_col, value_cols, progress_callback=None, status_callback=None, warning_callback=None, success_callback=None):
+    df_result = df.copy()
+    rate_cache = {}
+    total_rows = len(df)
+
+    for idx, row in df.iterrows():
+        currency = str(row[currency_col]).strip().upper()
+
+        if progress_callback:
+            progress_callback((idx + 1) / total_rows)
+        if status_callback:
+            status_callback(f"Processing row {idx + 1} of {total_rows}")
+
+        if not currency or currency == 'USD' or currency == 'NAN':
+            if currency == 'USD':
+                for col in value_cols:
+                    try:
+                        value = float(row[col])
+                        df_result.at[idx, f"{col}_USD"] = value
+                    except:
+                        df_result.at[idx, f"{col}_USD"] = None
+            continue
+
+        if currency in rate_cache:
+            rate = rate_cache[currency]
+        else:
+            rate, _ = convert_currency(1, currency, "USD")
+            rate_cache[currency] = rate
+
+        for col in value_cols:
+            try:
+                value = row[col]
+                if pd.isna(value) or value == '':
+                    df_result.at[idx, f"{col}_USD"] = None
+                    continue
+                value = float(value)
+                if rate is not None:
+                    converted_value = value * rate
+                    df_result.at[idx, f"{col}_USD"] = round(converted_value, 4)
+                else:
+                    df_result.at[idx, f"{col}_USD"] = None
+            except (ValueError, TypeError) as e:
+                if warning_callback:
+                    warning_callback(f"Row {idx + 1}, Column {col}: Invalid value - {str(e)}")
+                df_result.at[idx, f"{col}_USD"] = None
+
+    if success_callback:
+        success_callback(f"Conversion completed! Processed {total_rows} rows.")
+    return df_result
+
+def get_conversion_rate(from_currency, to_currency="USD"):
+    rate, _ = convert_currency(1, from_currency, to_currency)
+    return rate

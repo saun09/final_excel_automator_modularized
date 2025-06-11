@@ -1,0 +1,78 @@
+UNIT_CONVERSIONS_TO_KG = {
+    "g": 0.001,
+    "gram": 0.001,
+    "grams": 0.001,
+    "mg": 0.000001,
+    "ton": 1000,
+    "tons": 1000,
+    "quintal": 100,
+    "lb": 0.453592,
+    "lbs": 0.453592,
+    "pound": 0.453592,
+    "ounces": 0.0283495,
+    "oz": 0.0283495,
+    "kg": 1,
+    "kgs": 1,
+    "mts": 1000,
+    "metric ton": 1000
+}
+
+
+
+""" def detect_unit_column(df):
+    for col in df.columns:
+        values=df[col].dropna().astype(str).apply(lambda x: x.lower().strip())
+        unit_matches = values.isin(UNIT_CONVERSIONS_TO_KG.keys()).sum()
+        if unit_matches > 0:
+            return col
+    return None """
+
+def convert_to_kg(df):
+    unit_col = "UQC"
+    quantity_col = "Quantity"  # Default quantity column name
+    if unit_col is None:
+        print("No unit column found, skipping conversion to kg.")
+        return df  # No unit column found, return original DataFrame
+    
+    if quantity_col is None:
+        print("No quantity column found, skipping conversion to kg.")
+        return df
+    
+    print("unit column:", unit_col)
+    print("quantity column:", quantity_col) 
+
+    changed_rows= []
+    
+    for idx, row in df.iterrows():
+        unit = standardize_value(row[unit_col], unit_col)
+        quantity = row[quantity_col]
+
+        if pd.isna(unit) or pd.isna(quantity):
+            continue
+
+        if unit not in UNIT_CONVERSIONS_TO_KG:
+            continue
+
+        if unit in ["kg", "kgs"]:
+            continue  # Already in kg
+
+        factor = UNIT_CONVERSIONS_TO_KG[unit]
+        new_quantity = quantity * factor
+
+        changed_rows.append({
+            "Index": idx,
+            "Original Unit": unit,
+            "Original Quantity": quantity,
+            "Converted Quantity (kg)": new_quantity
+        })
+
+        # Update dataframe
+        df.at[idx, quantity_col] = new_quantity
+        df.at[idx, unit_col] = "KGS"
+
+    # Print all changed rows
+    print("\n🔁 Rows converted to kg:")
+    for row in changed_rows:
+        print(row)
+
+    return df
