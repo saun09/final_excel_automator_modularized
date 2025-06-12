@@ -145,9 +145,15 @@ def filter_trade_data(df, trade_type_col, country_col, supplier_col,
     if selected_trade_type and trade_type_col in df.columns:
         df = df[df[trade_type_col].astype(str).apply(normalize) == normalize(selected_trade_type)]
     if selected_country and country_col in df.columns:
-        df = df[df[country_col].astype(str).apply(normalize) == normalize(selected_country)]
+        if "All" not in selected_country:
+            normalized_selected = set(normalize(val) for val in selected_country)
+            df = df[df[country_col].astype(str).apply(normalize).isin(normalized_selected)]
+
     if selected_supplier and supplier_col in df.columns:
-        df = df[df[supplier_col].astype(str).apply(normalize) == normalize(selected_supplier)]
+        if "All" not in selected_supplier:
+            normalized_suppliers = set(normalize(val) for val in selected_supplier)
+            df = df[df[supplier_col].astype(str).apply(normalize).isin(normalized_suppliers)]
+
 
     st.success(f"✅ Filtered data shape: {df.shape}")
     return df

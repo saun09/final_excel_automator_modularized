@@ -195,8 +195,18 @@ if 'df_clustered' in st.session_state:
         supplier_options = clean_unique_options(df_clustered[supplier_country_col])
 
         selected_trade_type = st.selectbox("Filter by Trade Type", ["All Countries"] + trade_type_options)
-        selected_importer = st.selectbox("Filter by Importer Country", ["None"] + importer_options)
-        selected_supplier = st.selectbox("Filter by Supplier Country", ["All Countries"] + supplier_options)
+        selected_importer = st.multiselect(
+    "Filter by Importer City/State", 
+    ["All"] + importer_options, 
+    default=["All"]
+)
+
+        selected_supplier = st.multiselect(
+    "Filter by Supplier Country", 
+    ["All"] + supplier_options, 
+    default=["All"]
+)
+
 
    
 
@@ -206,8 +216,9 @@ if 'df_clustered' in st.session_state:
         importer_country_col,
         supplier_country_col,
         selected_trade_type if selected_trade_type != "None" else None,
-        selected_importer if selected_importer != "None" else None,
-        selected_supplier if selected_supplier != "None" else None
+        selected_importer if selected_importer and "None" not in selected_importer else None,
+        selected_supplier if selected_supplier and "None" not in selected_supplier else None,
+
     )
 
     # Selected Filters
