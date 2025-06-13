@@ -27,10 +27,7 @@ from analysis import (
     perform_cluster_analysis,
     filter_trade_data,
     full_periodic_analysis,
-    get_fy,
-    parse_custom_month_format,
-
-    
+    get_fy     
 )
 
 from export_excel import (
@@ -78,7 +75,7 @@ if 'df_original' in st.session_state:
 
 
 
-    if st.button("🧹 Clean Data Automatically"):
+    if st.button("Clean Data Automatically"):
         with st.spinner("Standardizing and converting..."):
 
         # Drop unnecessary columns from original df
@@ -139,14 +136,14 @@ if 'df_final' in st.session_state:
    
     csv_final = df_final.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "📥 Download Final Cleaned + Converted CSV",
+        "Download Final Cleaned + Converted CSV",
         csv_final,
         "final_output.csv",
         "text/csv"
     )
 
     # ------------------------ CLUSTERING ------------------------
-    st.subheader("🔗 Product Name Clustering")
+    st.subheader("Product Name Clustering")
     string_cols = list(dict.fromkeys(string_cols))
 
     cluster_column = st.selectbox("Choose column to cluster:", string_cols, key="cluster_column")
@@ -180,17 +177,17 @@ if 'df_clustered' in st.session_state:
     )
 
     # ------------------------ EXCEL EXPORT ------------------------
-    st.subheader("📊 Color-Coded Excel Export")
+    st.subheader("Color-Coded Excel Export")
     if st.button("Generate Color-Coded Excel", key="excel_export"):
         with st.spinner("Creating color-coded Excel file..."):
             excel_data = create_colored_excel(df_clustered, cluster_column)
             st.session_state['excel_data'] = excel_data
             st.session_state['excel_ready'] = True
-            st.success("✅ Excel file generated successfully!")
+            st.success("Excel file generated successfully!")
 
     if st.session_state.get('excel_ready', False):
         st.download_button(
-            "📥 Download Excel",
+            "Download Excel",
             data=st.session_state['excel_data'],
             file_name="clustered_data_colored.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -200,10 +197,10 @@ if 'df_clustered' in st.session_state:
     df_clustered = st.session_state["df_clustered"]
     cluster_col = f"{st.session_state['cluster_column_name']}_cluster"
 
-    st.subheader("📈 Data Analytics & Insights")
+    st.subheader("Data Analytics & Insights")
 
     # --- Trade Filters Section ---
-    with st.expander("🌍 Filter Trade Data"):
+    with st.expander("Filter Trade Data"):
         def clean_list(series):
             return sorted(set(s.strip().lower() for s in series.dropna().unique() if isinstance(s, str)))
 
@@ -218,9 +215,11 @@ if 'df_clustered' in st.session_state:
         importer_options = clean_unique_options(df_clustered[importer_country_col])
         supplier_options = clean_unique_options(df_clustered[supplier_country_col])
 
-        selected_trade_type = st.selectbox("Filter by Trade Type", ["All"] + trade_type_options)
+        selected_trade_type = st.selectbox("Filter by Trade Type", trade_type_options)
         selected_importer = st.multiselect("Filter by Importer City/State", ["All"] + importer_options, default=["All"])
         selected_supplier = st.multiselect("Filter by Supplier Country", ["All"] + supplier_options, default=["All"])
+
+
 
     # Apply the main filters first
         filtered_df = filter_trade_data(
@@ -232,6 +231,45 @@ if 'df_clustered' in st.session_state:
         selected_importer if selected_importer != ["All"] else None,
         selected_supplier if selected_supplier != ["All"] else None,
     )
+    
+
+        st.markdown("### Period-Based Aggregation")
+        date_cols = [col for col in filtered_df.columns if 'date' in col.lower() or 'month' in col.lower()]
+        value_cols = filtered_df.select_dtypes(include='number').columns.tolist()
+
+        if date_cols and value_cols:
+            selected_date_col = st.selectbox("Select Date Column", date_cols)
+            selected_value_col = st.selectbox("Select Value Column", value_cols)
+
+            if st.button("Compute Time-Based Averages"):
+                with st.spinner("Computing..."):
+                    try:
+                        results, msg = full_periodic_analysis(filtered_df, selected_date_col, selected_value_col)
+                        if results:
+                            st.success(msg)
+
+                            st.subheader("Monthly Average")
+                            st.dataframe(results["Monthly Average"])
+                            st.download_button("Download Monthly Avg", results["Monthly Average"].to_csv(index=False), "monthly_avg.csv")
+
+                            st.subheader("Quarterly Average")
+                            st.dataframe(results["Quarterly Average"])
+                            st.download_button("Download Quarterly Avg", results["Quarterly Average"].to_csv(index=False), "quarterly_avg.csv")
+
+                            st.subheader("Financial Year Average")
+                            st.dataframe(results["Financial Year Average"])
+                            st.download_button("Download FY Avg", results["Financial Year Average"].to_csv(index=False), "fy_avg.csv")
+
+                            st.subheader("Calendar Year Average")
+                            st.dataframe(results["Calendar Year Average"])
+                            st.download_button("Download CY Avg", results["Calendar Year Average"].to_csv(index=False), "cy_avg.csv")
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                        st.error(f"Aggregation failed: {e}")
+        else:
+            st.info("No valid date or numeric columns found for aggregation.")
+
         # Ensure lowercase mapping for case-insensitive matching
         columns_lower = [col.lower() for col in filtered_df.columns]
         col_map = {col.lower(): col for col in filtered_df.columns}
@@ -265,7 +303,7 @@ if 'df_clustered' in st.session_state:
 
 
     # Selected Filters Summary
-        st.markdown("### 🔎 Selected Filters")
+        st.markdown("### Selected Filters")
         st.write(f"**Trade Type:** {selected_trade_type or 'All'}")
         st.write(f"**Importer Country:** {selected_importer or 'All'}")
         st.write(f"**Supplier Country:** {selected_supplier or 'All'}")
@@ -274,14 +312,14 @@ if 'df_clustered' in st.session_state:
         if 'selected_items' in locals():
             st.write(f"**Item Descriptions:** {selected_items or 'All'}")
 
-        st.success(f"✅ Filtered data shape: {filtered_df.shape}")
+        st.success(f"Filtered data shape: {filtered_df.shape}")
 
     if not filtered_df.empty:
         st.dataframe(filtered_df)
         csv_filtered = filtered_df.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
+        st.download_button("Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
 
-        st.markdown("### 📊 Trade Data Analysis")
+        st.markdown("### Trade Data Analysis")
 
         string_cols = filtered_df.select_dtypes(include='object').columns.tolist()
         numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
@@ -307,7 +345,7 @@ if 'df_clustered' in st.session_state:
                     supplier_col
                 )
             except Exception as e:
-                st.error(f"❌ Error during trade analysis: {e}")
+                st.error(f"Error during trade analysis: {e}")
                 st.stop()
 
             if "error" in analysis_results:
@@ -319,7 +357,7 @@ if 'df_clustered' in st.session_state:
                     if not df_section.empty:
                         st.bar_chart(df_section.set_index(df_section.columns[0]))
         else:
-            st.warning("⚠️ Not enough string or numeric columns in the filtered data.")
+            st.warning("Not enough string or numeric columns in the filtered data.")
 
     
 
@@ -338,10 +376,10 @@ if 'df_clustered' in st.session_state:
         "Select Analysis Type:",
         ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"],
         format_func=lambda x: {
-            "cluster_summary": "📈 Cluster Summary",
-            "top_clusters": "🏆 Top Clusters",
-            "cluster_by_category": "📊 Cross-Analysis",
-            "detailed_breakdown": "🔍 Full Breakdown"
+            "cluster_summary": "Cluster Summary",
+            "top_clusters": "Top Clusters",
+            "cluster_by_category": "Cross-Analysis",
+            "detailed_breakdown": "Full Breakdown"
         }[x]
         )
 
@@ -357,7 +395,7 @@ if 'df_clustered' in st.session_state:
 
     selected_clusters = st.multiselect("Filter Clusters:", sorted(filtered_df[cluster_col].unique()), default=[])
 
-    if st.button("🔍 Run Analysis"):
+    if st.button("Run Analysis"):
         with st.spinner("Analyzing..."):
             result, message = perform_cluster_analysis(
                 filtered_df,
@@ -379,11 +417,11 @@ if 'df_clustered' in st.session_state:
 
         st.markdown("---")
 
-    with st.expander("📆 Period-Based Aggregation (Monthly, Quarterly, FY, CY)"):
-        date_col = st.selectbox("Select Date Column (e.g., BE_Date or Month)", df_clustered.columns)
-        value_col = st.selectbox("Select Value Column (e.g., Unit Price)", df_clustered.columns)
+    with st.expander("Period-Based Aggregation (Monthly, Quarterly, FY, CY)"):
+        date_col = st.selectbox("Select Date Column (e.g. BE_Date or Month)", df_clustered.columns)
+        value_col = st.selectbox("Select Value Column (e.g. Unit Price)", df_clustered.columns)
 
-        if st.button("📊 Compute Time-Based Averages"):
+        if st.button("Compute Time-Based Averages"):
             with st.spinner("Computing time-based aggregations..."):
                 from analysis import full_periodic_analysis
 
@@ -392,21 +430,21 @@ if 'df_clustered' in st.session_state:
                 if results:
                     st.success(msg)
 
-                    st.subheader("📅 Monthly Average")
+                    st.subheader("Monthly Average")
                     st.dataframe(results["Monthly Average"])
-                    st.download_button("📥 Download Monthly Avg", results["Monthly Average"].to_csv(index=False), "monthly_avg.csv")
+                    st.download_button("Download Monthly Avg", results["Monthly Average"].to_csv(index=False), "monthly_avg.csv")
 
-                    st.subheader("🗓️ Quarterly Average")
+                    st.subheader("Quarterly Average")
                     st.dataframe(results["Quarterly Average"])
-                    st.download_button("📥 Download Quarterly Avg", results["Quarterly Average"].to_csv(index=False), "quarterly_avg.csv")
+                    st.download_button("Download Quarterly Avg", results["Quarterly Average"].to_csv(index=False), "quarterly_avg.csv")
 
-                    st.subheader("📘 Financial Year Average")
+                    st.subheader("Financial Year Average")
                     st.dataframe(results["Financial Year Average"])
-                    st.download_button("📥 Download FY Avg", results["Financial Year Average"].to_csv(index=False), "fy_avg.csv")
+                    st.download_button("Download FY Avg", results["Financial Year Average"].to_csv(index=False), "fy_avg.csv")
 
-                    st.subheader("📗 Calendar Year Average")
+                    st.subheader("Calendar Year Average")
                     st.dataframe(results["Calendar Year Average"])
-                    st.download_button("📥 Download CY Avg", results["Calendar Year Average"].to_csv(index=False), "cy_avg.csv")
+                    st.download_button("Download CY Avg", results["Calendar Year Average"].to_csv(index=False), "cy_avg.csv")
                 else:
                     st.error(msg)
 
@@ -414,7 +452,7 @@ if 'df_clustered' in st.session_state:
 
 
         # Business Questions
-    st.subheader("🧠 Business Questions")
+    st.subheader("Business Questions")
 
     question = st.selectbox("What do you want to analyze?", [
         "Top Exporter Companies",
@@ -438,7 +476,7 @@ if 'df_clustered' in st.session_state:
     else:
         selected_month = None
 
-    if st.button("📌 Get Insight"):
+    if st.button("Get Insight"):
         with st.spinner("Processing your request..."):
             result_df = None
 
@@ -463,7 +501,7 @@ if 'df_clustered' in st.session_state:
                         ]
                     if not price_df.empty and "unit_price" in price_df.columns:
                         avg_price = price_df["unit_price"].astype(float).mean()
-                        st.success(f"📊 Average Unit Price of {selected_product} in {selected_month}: **{avg_price:.2f} USD/unit**")
+                        st.success(f"Average Unit Price of {selected_product} in {selected_month}: **{avg_price:.2f} USD/unit**")
                     else:
                         st.warning("No relevant data found for that product and month.")
 
@@ -476,15 +514,15 @@ if 'df_clustered' in st.session_state:
                     result_df.columns = ["Supplier Country", "Export Count"]
 
                 if result_df is not None:
-                    st.subheader("📋 Insight Result")
+                    st.subheader("Insight Result")
                     st.dataframe(result_df)
                     st.download_button(
-                        "📥 Download Results",
+                        "Download Results",
                         result_df.to_csv(index=False).encode("utf-8"),
                         "business_question_results.csv",
                         "text/csv"
                     )
             except Exception as e:
-                st.error(f"⚠️ Error while processing question: {e}")
+                st.error(f"Error while processing question: {e}")
     else:
-        st.warning("⚠️ No data matches the selected filters.")
+        st.warning("No data matches the selected filters.")

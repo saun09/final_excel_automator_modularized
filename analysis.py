@@ -211,16 +211,6 @@ def perform_trade_analysis(df, product_col, quantity_col, value_col, importer_co
 
 
 
-
-def parse_custom_month_format(date_str):
-    """
-    Converts 'mar--2021' to a datetime object (e.g., 2021-03-01)
-    """
-    try:
-        return pd.to_datetime(date_str.replace('--', '-'), format='%b-%Y')
-    except:
-        return pd.NaT
-
 def get_fy(date):
     if pd.isnull(date): return None
     if date.month <= 3:
@@ -236,12 +226,7 @@ def full_periodic_analysis(df, date_col, value_col):
     df_clean = df.copy()
     df_clean["_numeric"] = safe_numeric_conversion(df_clean[value_col])
 
-    # Use custom parser for 'Month' column format like 'mar--2021'
-    if df_clean[date_col].str.contains('--', na=False).any():
-        df_clean["Parsed_Date"] = df_clean[date_col].apply(parse_custom_month_format)
-    else:
-        df_clean["Parsed_Date"] = pd.to_datetime(df_clean[date_col], errors="coerce")
-
+    df_clean["Parsed_Date"] = pd.to_datetime(df_clean[date_col], errors="coerce")
     df_clean.dropna(subset=["Parsed_Date"], inplace=True)
 
     df_clean["Month_Period"] = df_clean["Parsed_Date"].dt.to_period("M").astype(str)
@@ -259,4 +244,4 @@ def full_periodic_analysis(df, date_col, value_col):
         "Quarterly Average": quarterly_avg,
         "Financial Year Average": fy_avg,
         "Calendar Year Average": cy_avg
-    }, "✅ All time-based averages computed"
+    }," All time-based averages computed"
