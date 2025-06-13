@@ -13,7 +13,9 @@ from data_cleaning import (
     fetch_supported_currencies,
     convert_sheet_to_usd,
     convert_currency,
-    get_conversion_rate
+    get_conversion_rate,
+    drop_unwanted_columns,
+    convert_month_column_to_datetime
 )
 
 from clustering import (
@@ -58,19 +60,48 @@ if 'df_original' in st.session_state:
     
     string_cols = detect_string_columns(df)
     st.session_state['string_cols'] = string_cols
+    st.session_state['string_cols'] = string_cols
     
-    st.write(f"**Detected string columns (to standardize):** {string_cols}")
+    #st.write(f"**Detected string columns (to standardize):** {string_cols}")
     
-    currency_col = st.selectbox("Select the currency column", df.columns)
-    value_cols = st.multiselect("Select the columns to convert to USD", df.columns)
-    quantity_col = st.selectbox("Select the quantity column", df.columns)
-    unit_col = st.selectbox("Select the unit column", df.columns)
+    # Automatically detect required columns regardless of case
+    df_columns_lower = [col.lower() for col in df.columns]
+    df_col_map = {col.lower(): col for col in df.columns}
 
-    if st.button("🧹 Standardize + Convert Units & Currency"):
+    currency_col = df_col_map.get("invoice_currency")
+    unit_col = df_col_map.get("uqc")
+    quantity_col = df_col_map.get("quantity")
+
+    required_value_cols_lower = ["unit_price", "total_ass_value", "invoice_unit_price_fc"]
+    value_cols = [df_col_map[col] for col in required_value_cols_lower if col in df_col_map]
+
+
+
+
+    if st.button("🧹 Clean Data Automatically"):
         with st.spinner("Standardizing and converting..."):
-            df_clean = standardize_dataframe(df.copy(), string_cols)
-            df_weight, converted_rows, deleted_rows = convert_to_kg(df_clean)
-            
+
+        # Drop unnecessary columns from original df
+            df_cleaned = drop_unwanted_columns(df)
+            st.session_state["df_cleaned"] = df_cleaned
+
+        # Detect standard columns (case-insensitive)
+            df_columns_lower = [col.lower() for col in df_cleaned.columns]
+            df_col_map = {col.lower(): col for col in df_cleaned.columns}
+
+            currency_col = df_col_map.get("invoice_currency")
+            unit_col = df_col_map.get("uqc")
+            quantity_col = df_col_map.get("quantity")
+            required_value_cols_lower = ["unit_price", "total_ass_value", "invoice_unit_price_fc"]
+            value_cols = [df_col_map[col] for col in required_value_cols_lower if col in df_col_map]
+
+        # Standardize strings
+            df_clean = standardize_dataframe(df_cleaned.copy(), detect_string_columns(df_cleaned))
+
+        # Convert units
+            df_weight, converted_rows, deleted_rows = convert_to_kg(df_clean, quantity_col, unit_col)
+
+        # Progress bar
             progress_bar = st.progress(0)
             status_text = st.empty()
 
@@ -79,42 +110,33 @@ if 'df_original' in st.session_state:
             def warning_cb(msg): st.warning(msg)
             def success_cb(msg): st.success(msg)
 
+        # Currency conversion
             df_final = convert_sheet_to_usd(
-                df_weight,
-                currency_col=currency_col,
-                value_cols=value_cols,
-                progress_callback=progress_cb,
-                status_callback=status_cb,
-                warning_callback=warning_cb,
-                success_callback=success_cb,
-            )
+            df_weight,
+            currency_col=currency_col,
+            value_cols=value_cols,
+            progress_callback=progress_cb,
+            status_callback=status_cb,
+            warning_callback=warning_cb,
+            success_callback=success_cb,
+        )
+            df_final = convert_month_column_to_datetime(df_final)
 
+        # Store in session state
             st.session_state["df_final"] = df_final
             st.session_state["converted_rows"] = converted_rows
             st.session_state["deleted_rows"] = deleted_rows
             st.rerun()
 
+
+
 # Post-Standardization Pipeline
 if 'df_final' in st.session_state:
     df_final = st.session_state["df_final"]
-    string_cols = st.session_state.get("string_cols", detect_string_columns(df_final))
-    
-    st.subheader("Final Data Sample")
-    st.dataframe(df_final.head(10))
+    df_cleaned = st.session_state.get("df_cleaned", df_final)  # Fallback just in case
+    string_cols = detect_string_columns(df_cleaned)
 
-    converted_rows = st.session_state.get("converted_rows", [])
-    deleted_rows = st.session_state.get("deleted_rows", [])
-
-    if converted_rows:
-        st.subheader("🔁 Rows Converted to kg")
-        st.dataframe(pd.DataFrame(converted_rows))
-
-    if deleted_rows:
-        st.subheader("🗑️ Rows Deleted (Non-Convertible Units)")
-        st.warning("These rows had unrecognized units and were removed.")
-        st.dataframe(pd.DataFrame(deleted_rows))
-
-    # Final CSV download
+   
     csv_final = df_final.to_csv(index=False).encode("utf-8")
     st.download_button(
         "📥 Download Final Cleaned + Converted CSV",
@@ -125,6 +147,8 @@ if 'df_final' in st.session_state:
 
     # ------------------------ CLUSTERING ------------------------
     st.subheader("🔗 Product Name Clustering")
+    string_cols = list(dict.fromkeys(string_cols))
+
     cluster_column = st.selectbox("Choose column to cluster:", string_cols, key="cluster_column")
 
     if st.button("Create Clusters"):
@@ -194,39 +218,63 @@ if 'df_clustered' in st.session_state:
         importer_options = clean_unique_options(df_clustered[importer_country_col])
         supplier_options = clean_unique_options(df_clustered[supplier_country_col])
 
-        selected_trade_type = st.selectbox("Filter by Trade Type", ["All Countries"] + trade_type_options)
-        selected_importer = st.multiselect(
-    "Filter by Importer City/State", 
-    ["All"] + importer_options, 
-    default=["All"]
-)
+        selected_trade_type = st.selectbox("Filter by Trade Type", ["All"] + trade_type_options)
+        selected_importer = st.multiselect("Filter by Importer City/State", ["All"] + importer_options, default=["All"])
+        selected_supplier = st.multiselect("Filter by Supplier Country", ["All"] + supplier_options, default=["All"])
 
-        selected_supplier = st.multiselect(
-    "Filter by Supplier Country", 
-    ["All"] + supplier_options, 
-    default=["All"]
-)
-
-
-   
-
-    filtered_df = filter_trade_data(
+    # Apply the main filters first
+        filtered_df = filter_trade_data(
         df_clustered.copy(),
         trade_type_col,
         importer_country_col,
         supplier_country_col,
-        selected_trade_type if selected_trade_type != "None" else None,
-        selected_importer if selected_importer and "None" not in selected_importer else None,
-        selected_supplier if selected_supplier and "None" not in selected_supplier else None,
-
+        selected_trade_type if selected_trade_type != "All" else None,
+        selected_importer if selected_importer != ["All"] else None,
+        selected_supplier if selected_supplier != ["All"] else None,
     )
+        # Ensure lowercase mapping for case-insensitive matching
+        columns_lower = [col.lower() for col in filtered_df.columns]
+        col_map = {col.lower(): col for col in filtered_df.columns}
 
-    # Selected Filters
-    st.markdown("### 🔎 Selected Filters")
-    st.write(f"**Trade Type:** {selected_trade_type or 'All'}")
-    st.write(f"**Importer Country:** {selected_importer or 'All'}")
-    st.write(f"**Supplier Country:** {selected_supplier or 'All'}")
-    st.success(f"✅ Filtered data shape: {filtered_df.shape}")
+# Check for and filter by CTH_HSCODE
+        if "cth_hscode" in columns_lower:
+            cth_col = col_map["cth_hscode"]
+            cth_hscode_options = sorted(filtered_df[cth_col].dropna().unique())
+            selected_cth = st.multiselect("Filter by CTH_HSCODE", ["All"] + list(map(str, cth_hscode_options)), default=["All"])
+            if "All" not in selected_cth:
+                filtered_df = filtered_df[filtered_df[cth_col].astype(str).isin(selected_cth)]
+
+# Filter by item_description + show corresponding HS code
+        if "item_description" in columns_lower and "cth_hscode" in columns_lower:
+            item_col = col_map["item_description"]
+            cth_col = col_map["cth_hscode"]
+
+    # Create a new combined column "HS: Description"
+            filtered_df["hs_desc_combo"] = (
+                filtered_df[cth_col].astype(str) + " : " + filtered_df[item_col].astype(str)
+            )
+
+    # Make a list of unique combo options
+            item_combo_options = sorted(filtered_df["hs_desc_combo"].dropna().unique())
+            selected_combos = st.multiselect("Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
+
+            if "All" not in selected_combos:
+        # Extract only the description part to filter
+                selected_descriptions = [combo.split(" : ", 1)[1] for combo in selected_combos]
+                filtered_df = filtered_df[filtered_df[item_col].isin(selected_descriptions)]
+
+
+    # Selected Filters Summary
+        st.markdown("### 🔎 Selected Filters")
+        st.write(f"**Trade Type:** {selected_trade_type or 'All'}")
+        st.write(f"**Importer Country:** {selected_importer or 'All'}")
+        st.write(f"**Supplier Country:** {selected_supplier or 'All'}")
+        if 'selected_cth' in locals():
+            st.write(f"**CTH_HSCODE:** {selected_cth or 'All'}")
+        if 'selected_items' in locals():
+            st.write(f"**Item Descriptions:** {selected_items or 'All'}")
+
+        st.success(f"✅ Filtered data shape: {filtered_df.shape}")
 
     if not filtered_df.empty:
         st.dataframe(filtered_df)

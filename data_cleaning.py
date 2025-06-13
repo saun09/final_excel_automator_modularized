@@ -6,7 +6,7 @@ import pandas as pd
 import requests
 from typing import Dict, List, Optional, Tuple
 import time
-
+from datetime import datetime
 from io import BytesIO
 def is_email(value):
     """Check if a value is a valid email address."""
@@ -108,6 +108,35 @@ def safe_numeric_conversion(series):
     
     return series.apply(convert_value)
 
+def drop_unwanted_columns(df):
+    """
+    Drops unwanted columns from the dataframe regardless of casing.
+    """
+
+    # Define columns to drop (in any case)
+    unwanted = [
+        'CUSH', 'MODE OF SHIPMENT', 'AG', 'Total_Duty_Paid', 'Supplier_Address',
+        'IEC', 'Importer_Name', 'Importer_Address', 'Importer_PIN',
+        'Importer_Phone', 'Importer_mail', 'Importer_Contact_Person_1',
+        'Importer_Contact_Person_2', 'IEC_Date_of_Establishment'
+    ]
+
+    # Lowercase the dataframe's columns
+    df_cols_lower = [col.lower() for col in df.columns]
+
+    # Map original column names to lowercase
+    col_mapping = dict(zip(df_cols_lower, df.columns))
+
+    # Prepare lowercase version of unwanted columns
+    unwanted_lower = [col.lower() for col in unwanted]
+
+    # Get actual column names to drop from original df
+    cols_to_drop = [col_mapping[col] for col in unwanted_lower if col in col_mapping]
+
+    # Drop them
+    df_cleaned = df.drop(columns=cols_to_drop)
+
+    return df_cleaned
 
 def clean_pin(value):
     """Clean PIN codes by removing prefixes and extracting 6-digit codes."""
@@ -193,10 +222,7 @@ def extract_numeric_quantity(val):
     match = re.match(r'^\s*(\d+(?:\.\d+)?)', str(val))
     return float(match.group(1)) if match else None
 
-def convert_to_kg(df):
-    unit_col = "UQC"
-    quantity_col = "Quantity"
-
+def convert_to_kg(df, quantity_col="Quantity", unit_col="UQC"):
     changed_rows = []
     rows_to_delete = []
 
@@ -234,6 +260,7 @@ def convert_to_kg(df):
     df = df.drop(index=[r["Index"] for r in rows_to_delete])
 
     return df, changed_rows, rows_to_delete
+
 
 import requests
 import pandas as pd
@@ -326,3 +353,18 @@ def convert_sheet_to_usd(df, currency_col, value_cols, progress_callback=None, s
 def get_conversion_rate(from_currency, to_currency="USD"):
     rate, _ = convert_currency(1, from_currency, to_currency)
     return rate
+
+def convert_month_column_to_datetime(df):
+    """
+    Converts 'Apr--2020' in the 'Month' column to datetime (e.g., 2020-04-01),
+    replacing the original values in-place.
+    """
+    def parse_date(val):
+        try:
+            return datetime.strptime(val.strip(), "%b--%Y")
+        except Exception:
+            return pd.NaT
+
+    if "Month" in df.columns:
+        df["Month"] = df["Month"].astype(str).apply(parse_date)
+    return df
