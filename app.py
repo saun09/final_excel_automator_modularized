@@ -199,7 +199,7 @@ if 'df_clustered' in st.session_state:
 
     st.subheader("Data Analytics & Insights")
 
-    # --- Trade Filters Section ---
+ # --- Trade Filters Section ---
     with st.expander("Filter Trade Data"):
         def clean_list(series):
             return sorted(set(s.strip().lower() for s in series.dropna().unique() if isinstance(s, str)))
@@ -219,8 +219,6 @@ if 'df_clustered' in st.session_state:
         selected_importer = st.multiselect("Filter by Importer City/State", ["All"] + importer_options, default=["All"])
         selected_supplier = st.multiselect("Filter by Supplier Country", ["All"] + supplier_options, default=["All"])
 
-
-
     # Apply the main filters first
         filtered_df = filter_trade_data(
         df_clustered.copy(),
@@ -231,113 +229,130 @@ if 'df_clustered' in st.session_state:
         selected_importer if selected_importer != ["All"] else None,
         selected_supplier if selected_supplier != ["All"] else None,
     )
-    
 
+    # --- Time-Based Filtering Section ---
         st.markdown("### Period-Based Aggregation")
-        date_cols = [col for col in filtered_df.columns if 'date' in col.lower() or 'month' in col.lower()]
+        st.info("Date Column is assumed to be `Month`")
+        month_col = "Month"
+
         value_cols = filtered_df.select_dtypes(include='number').columns.tolist()
+        selected_value_col = st.selectbox("Select Value Column", value_cols, key="value_col_select")
+        aggregation_type = st.selectbox("Choose Aggregation Type", ["Monthly", "Quarterly", "Financial Year", "Calendar Year"], key="aggregation_type_select")
 
-        if date_cols and value_cols:
-            selected_date_col = st.selectbox("Select Date Column", date_cols)
-            selected_value_col = st.selectbox("Select Value Column", value_cols)
+        filtered_by_time_df = filtered_df.copy()
 
-            if st.button("Compute Time-Based Averages"):
-                with st.spinner("Computing..."):
-                    try:
-                        results, msg = full_periodic_analysis(filtered_df, selected_date_col, selected_value_col)
-                        if results:
-                            st.success(msg)
+        if aggregation_type == "Monthly":
+            unique_months = sorted(filtered_df[month_col].dropna().unique())
+            selected_month = st.selectbox("Select Month", unique_months,key="month_select")
+            filtered_by_time_df = filtered_df[filtered_df[month_col] == selected_month]
 
-                            st.subheader("Monthly Average")
-                            st.dataframe(results["Monthly Average"])
-                            st.download_button("Download Monthly Avg", results["Monthly Average"].to_csv(index=False), "monthly_avg.csv")
+        elif aggregation_type == "Quarterly":
+            try:
+                df_temp = filtered_df.copy()
+                df_temp[month_col] = pd.to_datetime(df_temp[month_col])
+                df_temp["Quarter"] = df_temp[month_col].dt.to_period("Q").astype(str)
+                unique_quarters = sorted(df_temp["Quarter"].dropna().unique())
+                selected_quarter = st.selectbox("Select Quarter", unique_quarters,key="quarter_select")
+                filtered_by_time_df = df_temp[df_temp["Quarter"] == selected_quarter]
+            except Exception as e:
+                st.warning(f"Quarterly parsing failed: {e}")
 
-                            st.subheader("Quarterly Average")
-                            st.dataframe(results["Quarterly Average"])
-                            st.download_button("Download Quarterly Avg", results["Quarterly Average"].to_csv(index=False), "quarterly_avg.csv")
+        elif aggregation_type == "Financial Year":
+            df_temp = filtered_df.copy()
+            df_temp[month_col] = pd.to_datetime(df_temp[month_col], errors='coerce')
+            df_temp["FY"] = df_temp[month_col].apply(lambda x: f"{x.year - 1}-{x.year}" if x.month <= 3 else f"{x.year}-{x.year + 1}")
+            unique_fys = sorted(df_temp["FY"].dropna().unique())
+            selected_fy = st.selectbox("Select Financial Year", unique_fys,key="fy_select")
+            filtered_by_time_df = df_temp[df_temp["FY"] == selected_fy]
 
-                            st.subheader("Financial Year Average")
-                            st.dataframe(results["Financial Year Average"])
-                            st.download_button("Download FY Avg", results["Financial Year Average"].to_csv(index=False), "fy_avg.csv")
+        elif aggregation_type == "Calendar Year":
+            df_temp = filtered_df.copy()
+            df_temp[month_col] = pd.to_datetime(df_temp[month_col], errors='coerce')
+            df_temp["Year"] = df_temp[month_col].dt.year
+            unique_years = sorted(df_temp["Year"].dropna().unique())
+            selected_year = st.selectbox("Select Calendar Year", unique_years,key="year_select")
+            filtered_by_time_df = df_temp[df_temp["Year"] == selected_year]
 
-                            st.subheader("Calendar Year Average")
-                            st.dataframe(results["Calendar Year Average"])
-                            st.download_button("Download CY Avg", results["Calendar Year Average"].to_csv(index=False), "cy_avg.csv")
-                        else:
-                            st.error(msg)
-                    except Exception as e:
-                        st.error(f"Aggregation failed: {e}")
-        else:
-            st.info("No valid date or numeric columns found for aggregation.")
+    # --- Filter by CTH_HSCODE ---
+        columns_lower = [col.lower() for col in filtered_by_time_df.columns]
+        col_map = {col.lower(): col for col in filtered_by_time_df.columns}
 
-        # Ensure lowercase mapping for case-insensitive matching
-        columns_lower = [col.lower() for col in filtered_df.columns]
-        col_map = {col.lower(): col for col in filtered_df.columns}
-
-# Check for and filter by CTH_HSCODE
         if "cth_hscode" in columns_lower:
             cth_col = col_map["cth_hscode"]
-            cth_hscode_options = sorted(filtered_df[cth_col].dropna().unique())
+            cth_hscode_options = sorted(filtered_by_time_df[cth_col].dropna().unique())
             selected_cth = st.multiselect("Filter by CTH_HSCODE", ["All"] + list(map(str, cth_hscode_options)), default=["All"])
             if "All" not in selected_cth:
-                filtered_df = filtered_df[filtered_df[cth_col].astype(str).isin(selected_cth)]
+                filtered_by_time_df = filtered_by_time_df[filtered_by_time_df[cth_col].astype(str).isin(selected_cth)]
 
-# Filter by item_description + show corresponding HS code
+    # --- Filter by item_description + show corresponding HS code ---
         if "item_description" in columns_lower and "cth_hscode" in columns_lower:
             item_col = col_map["item_description"]
             cth_col = col_map["cth_hscode"]
 
-    # Create a new combined column "HS: Description"
-            filtered_df["hs_desc_combo"] = (
-                filtered_df[cth_col].astype(str) + " : " + filtered_df[item_col].astype(str)
-            )
+            filtered_by_time_df["hs_desc_combo"] = (
+            filtered_by_time_df[cth_col].astype(str) + " : " + filtered_by_time_df[item_col].astype(str)
+        )
 
-    # Make a list of unique combo options
-            item_combo_options = sorted(filtered_df["hs_desc_combo"].dropna().unique())
+            item_combo_options = sorted(filtered_by_time_df["hs_desc_combo"].dropna().unique())
             selected_combos = st.multiselect("Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
 
             if "All" not in selected_combos:
-        # Extract only the description part to filter
                 selected_descriptions = [combo.split(" : ", 1)[1] for combo in selected_combos]
-                filtered_df = filtered_df[filtered_df[item_col].isin(selected_descriptions)]
+                filtered_by_time_df = filtered_by_time_df[filtered_by_time_df[item_col].isin(selected_descriptions)]
 
-
-    # Selected Filters Summary
+    # --- Show Filters Summary ---
         st.markdown("### Selected Filters")
         st.write(f"**Trade Type:** {selected_trade_type or 'All'}")
         st.write(f"**Importer Country:** {selected_importer or 'All'}")
         st.write(f"**Supplier Country:** {selected_supplier or 'All'}")
         if 'selected_cth' in locals():
             st.write(f"**CTH_HSCODE:** {selected_cth or 'All'}")
-        if 'selected_items' in locals():
-            st.write(f"**Item Descriptions:** {selected_items or 'All'}")
+        if 'selected_combos' in locals():
+            st.write(f"**Item Descriptions:** {selected_combos or 'All'}")
 
-        st.success(f"Filtered data shape: {filtered_df.shape}")
+        st.success(f"Filtered data shape: {filtered_by_time_df.shape}")
 
-    if not filtered_df.empty:
-        st.dataframe(filtered_df)
-        csv_filtered = filtered_df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
+        if not filtered_by_time_df.empty:
+            st.dataframe(filtered_by_time_df)
+            csv_filtered = filtered_by_time_df.to_csv(index=False).encode("utf-8")
+            st.download_button("Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
 
+        # --- Time-Based Aggregation ---
+            if st.button("Compute Time-Based Averages for Filtered Data"):
+                from analysis import full_periodic_analysis
+                with st.spinner("Computing Aggregations..."):
+                    try:
+                        results, msg = full_periodic_analysis(filtered_by_time_df, "Month", selected_value_col)
+                        if results:
+                            st.success(msg)
+                            for label, table in results.items():
+                                st.subheader(label)
+                                st.dataframe(table)
+                                st.download_button(f"Download {label}", table.to_csv(index=False), f"{label.lower().replace(' ', '_')}.csv")
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                        st.error(f"Aggregation failed: {e}")
+
+        # --- Trade Analysis ---
         st.markdown("### Trade Data Analysis")
-
-        string_cols = filtered_df.select_dtypes(include='object').columns.tolist()
-        numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
+        string_cols = filtered_by_time_df.select_dtypes(include='object').columns.tolist()
+        numeric_cols = filtered_by_time_df.select_dtypes(include='number').columns.tolist()
 
         st.write("String Columns:", string_cols)
         st.write("Numeric Columns:", numeric_cols)
 
         if string_cols and numeric_cols:
-            product_col = st.selectbox("Select Product Column", string_cols)
-            quantity_col = st.selectbox("Select Quantity Column", numeric_cols)
-            value_col = st.selectbox("Select Value Column", numeric_cols)
-            importer_col = st.selectbox("Select Importer Column", string_cols)
-            supplier_col = st.selectbox("Select Supplier Column", string_cols)
+            product_col = st.selectbox("Select Product Column", string_cols,key="product_col")
+            quantity_col = st.selectbox("Select Quantity Column", numeric_cols, key="quantity_col")
+            value_col = st.selectbox("Select Value Column", numeric_cols,key="value_col_analysis")
+            importer_col = st.selectbox("Select Importer Column", string_cols, key="importer_col")
+            supplier_col = st.selectbox("Select Supplier Column", string_cols, key="supplier_col")
 
             from analysis import perform_trade_analysis
             try:
                 analysis_results = perform_trade_analysis(
-                    filtered_df,
+                    filtered_by_time_df,
                     product_col,
                     quantity_col,
                     value_col,
