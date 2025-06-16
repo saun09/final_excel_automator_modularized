@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from io import BytesIO
+import matplotlib.dates as mdates
 
 def forecast_item(df, item_name, value_column, cluster_col, date_col="Month"):
     try:
@@ -37,9 +38,7 @@ def forecast_item(df, item_name, value_column, cluster_col, date_col="Month"):
         forecast = model.predict(future)
 
         forecast_df = forecast[["ds", "yhat"]].tail(12)
-        forecast_df["Month"] = forecast_df["ds"].dt.strftime("%Y-%m")
         forecast_df = forecast_df.rename(columns={"yhat": value_column})
-        forecast_df = forecast_df[["Month", value_column]]
 
         # Trend analysis
         trend = forecast_df[value_column].diff().mean()
@@ -50,18 +49,24 @@ def forecast_item(df, item_name, value_column, cluster_col, date_col="Month"):
         else:
             description = "⚖️ No significant trend detected in forecast."
 
-        # Plot historical (green) and forecast (red)
-        plt.figure(figsize=(10, 5))
+        # Plot historical (green) and forecast (red) with proper x-axis alignment
+        plt.figure(figsize=(12, 6))
         sns.lineplot(data=monthly_df, x="ds", y="y", label="Historical", color="green")
-        sns.lineplot(data=forecast_df, x="Month", y=value_column, label="Forecast", color="red")
+        sns.lineplot(data=forecast_df, x="ds", y=value_column, label="Forecast", color="red")
+
         plt.title(f"{value_column} Forecast for {item_name}")
         plt.xlabel("Month")
-        plt.ylabel(value_column)
+        plt.ylabel("Quantity")
         plt.xticks(rotation=45)
+
+        # Format x-axis as dates
+        plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+
         plt.legend()
+        plt.tight_layout()
 
         buf = BytesIO()
-        plt.tight_layout()
         plt.savefig(buf, format="png")
         plt.close()
         buf.seek(0)
