@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-
+import plotly.express as px
+import matplotlib.pyplot as plt
 # Import from modularized files
 from data_cleaning import (
     detect_string_columns, 
@@ -27,12 +28,14 @@ from analysis import (
     perform_cluster_analysis,
     filter_trade_data,
     full_periodic_analysis,
-    get_fy     
+    get_fy,  
 )
 
 from export_excel import (
     create_colored_excel
 )
+
+from forecasting import forecast_item
 
 # App Title
 st.title("Automatic String Column Standardizer with Clustering")
@@ -463,7 +466,58 @@ if 'df_clustered' in st.session_state:
                 else:
                     st.error(msg)
 
+    with st.expander("📈 Forecast Product Price or Quantity"):
+        st.markdown("Select an item and the metric you'd like to forecast.")
 
+        if 'df_clustered' in st.session_state:
+            df_clustered = st.session_state["df_clustered"]
+            cluster_col = f"{st.session_state['cluster_column_name']}_cluster"
+
+            if cluster_col not in df_clustered.columns:
+                st.error(f"Column `{cluster_col}` not found in the dataset.")
+            else:
+            # Only include clusters with enough data
+                valid_counts = df_clustered[cluster_col].value_counts()
+                valid_items = valid_counts[valid_counts > 6].index.tolist()
+
+                if not valid_items:
+                    st.warning("No items with sufficient data (more than 6 rows) to forecast.")
+                else:
+                    item_selected = st.selectbox("Choose Item", sorted(valid_items), key="forecast_item")
+                    column_choice = st.selectbox(
+                    "Column to Forecast", 
+                    ["Quantity", "Unit_Price_USD", "Total_Ass_Value_USD"], 
+                    key="forecast_metric"
+                )
+
+                    if st.button("Run Forecast", key="run_forecast_btn"):
+                          # Ensure this is correctly defined in your analysis.py
+
+                        forecast_df, description, plot_buf = forecast_item(df_clustered, item_selected, column_choice, cluster_col)
+
+                        if isinstance(description, str) and "error" in description.lower():
+                            st.error(description)
+                        elif forecast_df is not None:
+                            st.success(f"Forecast for '{item_selected}' over the next 5 years:")
+                            st.dataframe(forecast_df)
+
+                            st.markdown(f"📊 **Trend Insight:** {description}")
+
+                            st.image(plot_buf, caption="Historical (green) vs Forecast (red)",  use_container_width=True)
+
+                            st.download_button(
+        label="Download Forecast CSV",
+        data=forecast_df.to_csv(index=False),
+        file_name=f"{item_selected}_{column_choice}_forecast.csv",
+        mime="text/csv"
+    )
+                        else:
+                            st.warning(description)
+
+                    else:
+                        st.warning("Data not found. Please upload and process the file first.")
+
+    
 
 
         # Business Questions

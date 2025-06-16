@@ -132,9 +132,11 @@ def drop_unwanted_columns(df):
 
     # Get actual column names to drop from original df
     cols_to_drop = [col_mapping[col] for col in unwanted_lower if col in col_mapping]
+    unnamed_cols = [col for col in df.columns if col.strip().lower().startswith('unnamed:')]
 
-    # Drop them
-    df_cleaned = df.drop(columns=cols_to_drop)
+    # Drop all identified columns
+    df_cleaned = df.drop(columns=cols_to_drop + unnamed_cols)
+
 
     return df_cleaned
 
@@ -354,17 +356,47 @@ def get_conversion_rate(from_currency, to_currency="USD"):
     rate, _ = convert_currency(1, from_currency, to_currency)
     return rate
 
+
 def convert_month_column_to_datetime(df):
     """
-    Converts 'Apr--2020' in the 'Month' column to datetime (e.g., 2020-04-01),
-    replacing the original values in-place.
+    Converts various messy date formats in the 'Month' column to datetime (e.g., 2020-04-01).
+    Supported formats:
+    - Apr--2020, June--2020
+    - June-2020, Aug-19, july-19, etc.
+    - Jun/20, July 2020, etc.
+    Replaces original 'Month' column with standardized datetime objects.
     """
+
     def parse_date(val):
+        val = str(val).strip().lower()
+        val = re.sub(r'[^a-z0-9]', '-', val)  # replace all non-alphanum with dashes
+        val = re.sub(r'-+', '-', val)         # collapse repeated dashes
+        
+        # Try full month name first (e.g., June-2020)
         try:
-            return datetime.strptime(val.strip(), "%b--%Y")
-        except Exception:
-            return pd.NaT
+            return datetime.strptime(val, "%B-%Y")
+        except:
+            pass
+
+        # Try short month name + full year (e.g., Jun-2020)
+        try:
+            return datetime.strptime(val, "%b-%Y")
+        except:
+            pass
+
+        # Try short/full month + 2-digit year (e.g., Jun-20 or July-19)
+        try:
+            return datetime.strptime(val, "%b-%y")
+        except:
+            pass
+
+        try:
+            return datetime.strptime(val, "%B-%y")
+        except:
+            pass
+
+        return pd.NaT  # fallback
 
     if "Month" in df.columns:
-        df["Month"] = df["Month"].astype(str).apply(parse_date)
+        df["Month"] = df["Month"].apply(parse_date)
     return df

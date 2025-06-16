@@ -3,6 +3,8 @@ import streamlit as st
 from data_cleaning import safe_numeric_conversion
 import calendar
 from dateutil import parser
+import numpy as np
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 def group_data(df, group_by_columns, aggregation_rules=None):
     """
@@ -155,7 +157,7 @@ def filter_trade_data(df, trade_type_col, country_col, supplier_col,
             df = df[df[supplier_col].astype(str).apply(normalize).isin(normalized_suppliers)]
 
 
-    st.success(f"✅ Filtered data shape: {df.shape}")
+    st.success(f"Filtered data shape: {df.shape}")
     return df
 
 import pandas as pd
@@ -245,3 +247,6 @@ def full_periodic_analysis(df, date_col, value_col):
         "Financial Year Average": fy_avg,
         "Calendar Year Average": cy_avg
     }," All time-based averages computed"
+
+
+
