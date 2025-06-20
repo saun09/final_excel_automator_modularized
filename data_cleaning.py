@@ -140,16 +140,16 @@ def drop_unwanted_columns(df):
 
     return df_cleaned
 
-def clean_pin(value):
-    """Clean PIN codes by removing prefixes and extracting 6-digit codes."""
-    if pd.isna(value):
-        return value
-    value = str(value)
-    # Remove "pin-" prefix, case-insensitive
-    value = re.sub(r'pin-', '', value, flags=re.IGNORECASE).strip()
-    # Extract first group of 6 digits
-    match = re.search(r'\b(\d{6})\b', value)
-    return match.group(1) if match else value
+#def clean_pin(value):
+  #  """Clean PIN codes by removing prefixes and extracting 6-digit codes."""
+  #  if pd.isna(value):
+  #      return value
+   # value = str(value)
+   # # Remove "pin-" prefix, case-insensitive
+   # value = re.sub(r'pin-', '', value, flags=re.IGNORECASE).strip()
+   # # Extract first group of 6 digits
+   # match = re.search(r'\b(\d{6})\b', value)
+   # return match.group(1) if match else value
 
 def remove_commas_and_periods(value):
     """Remove commas and full stops from a string."""
@@ -169,8 +169,8 @@ def standardize_value(val, col_name=""):
     if val_str.strip() == "":
         return val_str
     
-    if "pin" in col_name.lower():
-        return clean_pin(val)
+   # if "pin" in col_name.lower():
+    #    return clean_pin(val)
 
     val_str = unicodedata.normalize('NFKD', val_str).encode('ascii', 'ignore').decode('utf-8')
     val_str = val_str.lower()
