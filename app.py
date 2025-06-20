@@ -344,24 +344,31 @@ if 'df_clustered' in st.session_state:
         #st.write(f"**Item Descriptions:** {selected_descriptions }")
 
         # Step 6: Trigger analyze_trend automatically for multiple products
-        if not filtered_df.empty and selected_descriptions and len(selected_years_int) >= 2:
+        if (not filtered_df.empty and selected_descriptions and len(selected_years_int) >= 2):
             trade_type = selected_trade_type if 'selected_trade_type' in locals() else "Imports"
-            
-            st.markdown("#### Analysis Results")
+            st.markdown("#### 🧪 Analysis Results")
 
             for product_name in selected_descriptions:
                 try:
                     result = analyze_trend(df, trade_type, product_name, selected_years_int)
-                    st.markdown(f"- **{product_name}**: {result}")
-                except Exception as e:
-                    st.warning(f" Could not analyze trend for {product_name}: {e}")
+                    if result:  # only display if result is not empty
+                        st.markdown(f"- **{product_name}**: {result}")
+                except Exception:
+                    # Silently ignore if trend analysis fails
+                    pass
+
             st.dataframe(filtered_by_time_df)
+
             csv_filtered = filtered_by_time_df.to_csv(index=False).encode("utf-8")
-            st.download_button("Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
+            st.download_button(
+                "📥 Download Filtered Data",
+                csv_filtered,
+                "filtered_trade_data.csv",
+                "text/csv"
+            )
 
-
-        # --- Time-Based Aggregation ---
-            if st.button("Compute Time-Based Averages for Filtered Data"):
+            # --- Time-Based Aggregation ---
+            if st.button("🧮 Compute Time-Based Averages for Filtered Data"):
                 from analysis import full_periodic_analysis
                 with st.spinner("Computing Aggregations..."):
                     try:
@@ -371,11 +378,16 @@ if 'df_clustered' in st.session_state:
                             for label, table in results.items():
                                 st.subheader(label)
                                 st.dataframe(table)
-                                st.download_button(f"Download {label}", table.to_csv(index=False), f"{label.lower().replace(' ', '_')}.csv")
+                                st.download_button(
+                                    f"📥 Download {label}",
+                                    table.to_csv(index=False),
+                                    f"{label.lower().replace(' ', '_')}.csv"
+                                )
                         else:
                             st.error(msg)
                     except Exception as e:
-                        st.error(f"Aggregation failed: {e}")
+                        st.error(f"Aggregation failed.")
+
 
         # --- Trade Analysis ---
     with st.expander("Trade Data Analysis"):
