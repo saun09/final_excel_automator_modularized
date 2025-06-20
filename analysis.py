@@ -249,4 +249,68 @@ def full_periodic_analysis(df, date_col, value_col):
     }," All time-based averages computed"
 
 
+def analyze_trend(df, trade_type, product_name, selected_years):
+    df_filtered = df[
+        (df["Type"] == trade_type) &
+        (df["Item_Description_cluster"] == product_name) &
+        (df["YEAR"].isin(selected_years))
+    ]
 
+    if len(selected_years) < 2:
+        return "Please select at least two years to perform trend analysis."
+
+    years_sorted = sorted(selected_years)
+    year1, year2 = years_sorted[0], years_sorted[-1]
+
+    q1 = df_filtered[df_filtered["YEAR"] == year1]["Quantity"].sum()
+    q2 = df_filtered[df_filtered["YEAR"] == year2]["Quantity"].sum()
+    diff = q2 - q1
+
+    trend = "increased" if diff > 0 else "decreased"
+    trend_type = "growing" if diff > 0 else "declining"
+
+    result = (
+        f"From {year1} to {year2}, {trade_type.lower()}s have {trend} by {abs(diff):,.0f} units, "
+        f"indicating a {trend_type} trend for the product '{product_name}'.\n\n"
+        f"It was {q1:,.0f} units in {year1} and {q2:,.0f} units in {year2}, "
+        f"hence it is {trend}."
+    )
+    return result
+
+
+def comparative_analysis(df, selected_years, time_period_type, selected_quarter_or_month, selected_hscode, selected_item, quantity_col='Quantity', month_col='Month'):
+    import pandas as pd
+
+    # Convert "Month" column to datetime
+    df[month_col] = pd.to_datetime(df[month_col], errors='coerce')
+
+    # Extract year and month/quarter
+    df['year'] = df[month_col].dt.year
+    df['month_num'] = df[month_col].dt.month
+    df['quarter'] = df[month_col].dt.quarter
+
+    # Step 1: Filter by selected years
+    df_filtered = df[df['year'].isin(selected_years)]
+
+    # Step 2: Filter by time period
+    if time_period_type.lower() == 'quarter':
+        quarter_map = {'Q1': 1, 'Q2': 2, 'Q3': 3, 'Q4': 4}
+        selected_q = quarter_map[selected_quarter_or_month.upper()]
+        df_filtered = df_filtered[df_filtered['quarter'] == selected_q]
+
+    elif time_period_type.lower() == 'month':
+        month_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                     'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+        selected_m = month_map[selected_quarter_or_month.upper()]
+        df_filtered = df_filtered[df_filtered['month_num'] == selected_m]
+
+    # Step 3: Filter by HS Code and Item Description
+    df_filtered = df_filtered[
+        (df_filtered['CTH_HSCODE'] == selected_hscode) &
+        (df_filtered['Item_Description_Cluster'] == selected_item)
+    ]
+
+    # Step 4: Aggregate quantities by year
+    result = df_filtered.groupby('year')[quantity_col].sum().reset_index()
+
+    return result

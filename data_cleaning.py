@@ -400,3 +400,51 @@ def convert_month_column_to_datetime(df):
     if "Month" in df.columns:
         df["Month"] = df["Month"].apply(parse_date)
     return df
+
+import re
+from rapidfuzz import fuzz
+
+def clean_supplier_name(name):
+    """
+    Cleans supplier names by removing common suffixes and special characters.
+    """
+    name = str(name).lower().strip()
+    name = re.sub(r'[^a-z0-9\s]', '', name)
+
+    suffixes = [' limited', ' ltd', ' inc', ' pte', ' co', ' gmbh', ' bvba', ' llc', ' incorporated']
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+
+    name = re.sub(r'\s+', ' ', name)
+    return name.strip()
+
+
+def cluster_supplier_names(df, supplier_column="Supplier_Name", threshold=90):
+    """
+    Clusters similar supplier names using fuzzy matching and replaces the original column.
+    """
+    if supplier_column not in df.columns:
+        return df
+
+    unique_names = df[supplier_column].dropna().unique()
+    clusters = []
+    canonical_names = []
+    name_to_cluster = {}
+
+    for name in unique_names:
+        cleaned = clean_supplier_name(name)
+        matched = False
+        for i, canon in enumerate(canonical_names):
+            if fuzz.token_sort_ratio(cleaned, canon) > threshold:
+                clusters[i].append(name)
+                name_to_cluster[name] = canon  # Use canonical cluster name
+                matched = True
+                break
+        if not matched:
+            clusters.append([name])
+            canonical_names.append(cleaned)
+            name_to_cluster[name] = cleaned
+
+    df[supplier_column] = df[supplier_column].map(name_to_cluster).fillna(df[supplier_column])
+    return df

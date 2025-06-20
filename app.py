@@ -16,7 +16,9 @@ from data_cleaning import (
     convert_currency,
     get_conversion_rate,
     drop_unwanted_columns,
-    convert_month_column_to_datetime
+    convert_month_column_to_datetime,
+    clean_supplier_name, 
+    cluster_supplier_names
 )
 
 from clustering import (
@@ -29,6 +31,8 @@ from analysis import (
     filter_trade_data,
     full_periodic_analysis,
     get_fy,  
+    analyze_trend,
+    comparative_analysis
 )
 
 from export_excel import (
@@ -121,6 +125,10 @@ if 'df_original' in st.session_state:
             success_callback=success_cb,
         )
             df_final = convert_month_column_to_datetime(df_final)
+            supplier_column = df_col_map.get("supplier_name")  # Case-insensitive match
+            if supplier_column:
+                df_final = cluster_supplier_names(df_final, supplier_column=supplier_column)
+                st.success("Supplier names clustered successfully.")
 
         # Store in session state
             st.session_state["df_final"] = df_final
@@ -277,48 +285,80 @@ if 'df_clustered' in st.session_state:
             filtered_by_time_df = df_temp[df_temp["Year"] == selected_year]
 
     # --- Filter by CTH_HSCODE ---
-        columns_lower = [col.lower() for col in filtered_by_time_df.columns]
-        col_map = {col.lower(): col for col in filtered_by_time_df.columns}
+        # Step 1: Detect and normalize column names
+        columns_lower = [col.lower() for col in filtered_df.columns]
+        col_map = {col.lower(): col for col in filtered_df.columns}
 
+        # Step 2: Handle year filtering from either 'YEAR' or 'Month'
+        if "year" in columns_lower:
+            year_col = col_map["year"]
+            filtered_df[year_col] = filtered_df[year_col].astype(int)
+        else:
+            if "month" in columns_lower:
+                month_col = col_map["month"]
+                filtered_df[month_col] = pd.to_datetime(filtered_df[month_col], errors="coerce")
+                filtered_df["year_extracted"] = filtered_df[month_col].dt.year
+                year_col = "year_extracted"
+            else:
+                year_col = None
+
+        if year_col:
+            unique_years = sorted(filtered_df[year_col].dropna().unique())
+            selected_years = st.multiselect("📅 Filter by Year", ["All"] + list(map(str, unique_years)), default=["All"])
+            if "All" not in selected_years:
+                selected_years_int = list(map(int, selected_years))
+                filtered_df = filtered_df[filtered_df[year_col].isin(selected_years_int)]
+            else:
+                selected_years_int = unique_years
+
+        # Step 3: Filter by HS Code
         if "cth_hscode" in columns_lower:
             cth_col = col_map["cth_hscode"]
-            cth_hscode_options = sorted(filtered_by_time_df[cth_col].dropna().unique())
-            selected_cth = st.multiselect("Filter by CTH_HSCODE", ["All"] + list(map(str, cth_hscode_options)), default=["All"])
+            cth_hscode_options = sorted(filtered_df[cth_col].dropna().astype(str).unique())
+            selected_cth = st.multiselect("🔢 Filter by CTH_HSCODE", ["All"] + cth_hscode_options, default=["All"])
             if "All" not in selected_cth:
-                filtered_by_time_df = filtered_by_time_df[filtered_by_time_df[cth_col].astype(str).isin(selected_cth)]
+                filtered_df = filtered_df[filtered_df[cth_col].astype(str).isin(selected_cth)]
 
-    # --- Filter by item_description + show corresponding HS code ---
+        # Step 4: Filter by HSCode + Item Description Combo
         if "item_description" in columns_lower and "cth_hscode" in columns_lower:
             item_col = col_map["item_description"]
             cth_col = col_map["cth_hscode"]
 
-            filtered_by_time_df["hs_desc_combo"] = (
-            filtered_by_time_df[cth_col].astype(str) + " : " + filtered_by_time_df[item_col].astype(str)
-        )
+            filtered_df["hs_desc_combo"] = (
+                filtered_df[cth_col].astype(str) + " : " + filtered_df[item_col].astype(str)
+            )
 
-            item_combo_options = sorted(filtered_by_time_df["hs_desc_combo"].dropna().unique())
-            selected_combos = st.multiselect("Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
+            item_combo_options = sorted(filtered_df["hs_desc_combo"].dropna().unique())
+            selected_combos = st.multiselect("🧾 Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
 
             if "All" not in selected_combos:
                 selected_descriptions = [combo.split(" : ", 1)[1] for combo in selected_combos]
-                filtered_by_time_df = filtered_by_time_df[filtered_by_time_df[item_col].isin(selected_descriptions)]
+                filtered_df = filtered_df[filtered_df[item_col].isin(selected_descriptions)]
+            else:
+                selected_descriptions = filtered_df[item_col].dropna().unique().tolist()
 
-    # --- Show Filters Summary ---
-        st.markdown("### Selected Filters")
-        st.write(f"**Trade Type:** {selected_trade_type or 'All'}")
-        st.write(f"**Importer Country:** {selected_importer or 'All'}")
-        st.write(f"**Supplier Country:** {selected_supplier or 'All'}")
-        if 'selected_cth' in locals():
-            st.write(f"**CTH_HSCODE:** {selected_cth or 'All'}")
-        if 'selected_combos' in locals():
-            st.write(f"**Item Descriptions:** {selected_combos or 'All'}")
+        # Step 5: Show filters summary
+        #st.markdown("### 🧮 Selected Filters Summary")
+        #st.write(f"**Years:** {selected_years}")
+        #st.write(f"**HS Codes:** {selected_cth if 'selected_cth' in locals() else 'All'}")
+        #st.write(f"**Item Descriptions:** {selected_descriptions }")
 
-        st.success(f"Filtered data shape: {filtered_by_time_df.shape}")
+        # Step 6: Trigger analyze_trend automatically for multiple products
+        if not filtered_df.empty and selected_descriptions and len(selected_years_int) >= 2:
+            trade_type = selected_trade_type if 'selected_trade_type' in locals() else "Imports"
+            
+            st.markdown("#### 📈 Analysis Results")
 
-        if not filtered_by_time_df.empty:
+            for product_name in selected_descriptions:
+                try:
+                    result = analyze_trend(df, trade_type, product_name, selected_years_int)
+                    st.markdown(f"- **{product_name}**: {result}")
+                except Exception as e:
+                    st.warning(f"⚠️ Could not analyze trend for {product_name}: {e}")
             st.dataframe(filtered_by_time_df)
             csv_filtered = filtered_by_time_df.to_csv(index=False).encode("utf-8")
             st.download_button("Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
+
 
         # --- Time-Based Aggregation ---
             if st.button("Compute Time-Based Averages for Filtered Data"):
@@ -338,9 +378,11 @@ if 'df_clustered' in st.session_state:
                         st.error(f"Aggregation failed: {e}")
 
         # --- Trade Analysis ---
+    with st.expander("Trade Data Analysis"):
         st.markdown("### Trade Data Analysis")
         string_cols = filtered_by_time_df.select_dtypes(include='object').columns.tolist()
         numeric_cols = filtered_by_time_df.select_dtypes(include='number').columns.tolist()
+            
 
         st.write("String Columns:", string_cols)
         st.write("Numeric Columns:", numeric_cols)
@@ -354,14 +396,14 @@ if 'df_clustered' in st.session_state:
 
             from analysis import perform_trade_analysis
             try:
-                analysis_results = perform_trade_analysis(
-                    filtered_by_time_df,
-                    product_col,
-                    quantity_col,
-                    value_col,
-                    importer_col,
-                    supplier_col
-                )
+                    analysis_results = perform_trade_analysis(
+                        filtered_by_time_df,
+                        product_col,
+                        quantity_col,
+                        value_col,
+                        importer_col,
+                        supplier_col
+                    )
             except Exception as e:
                 st.error(f"Error during trade analysis: {e}")
                 st.stop()
@@ -377,64 +419,72 @@ if 'df_clustered' in st.session_state:
         else:
             st.warning("Not enough string or numeric columns in the filtered data.")
 
+        
+
+    #  numeric_cols = detect_numeric_columns(filtered_df)
+    # categorical_cols = detect_categorical_columns(filtered_df)
+
+        string_cols = filtered_by_time_df.select_dtypes(include='object').columns.tolist()
+        numeric_cols = filtered_by_time_df.select_dtypes(include='number').columns.tolist()
+            
+
+        st.write("String Columns:", string_cols)
+        st.write("Numeric Columns:", numeric_cols)
+        #""" col1, col2 = st.columns(2)
+        #with col1:
+        #    st.write("**Numeric Columns:**")
+    #     st.write(numeric_cols or "None")
+    # with col2:
+        #  st.write("**Categorical Columns:**")
+        #  st.write(categorical_cols or "None") """
+
+        analysis_type = st.selectbox(
+            "Select Analysis Type:",
+            ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"],
+            format_func=lambda x: {
+                "cluster_summary": "Cluster Summary",
+                "top_clusters": "Top Clusters",
+                "cluster_by_category": "Cross-Analysis",
+                "detailed_breakdown": "Full Breakdown"
+            }[x]
+            )
+
+        target_col = None
+        group_by_col = None
+
+        if numeric_cols:
+            target_col = st.selectbox("Select numeric column:", ["None"] + numeric_cols)
+            target_col = None if target_col == "None" else target_col
+
+        if analysis_type in ["cluster_by_category", "detailed_breakdown"] and string_cols:
+            group_by_col = st.selectbox("Group by column:", string_cols)
+
+        selected_clusters = st.multiselect("Filter Clusters:", sorted(filtered_df[cluster_col].unique()), default=[])
+
+        if st.button("Run Analysis"):
+            with st.spinner("Analyzing..."):
+                result, message = perform_cluster_analysis(
+                    filtered_df,
+                    cluster_col,
+                    analysis_type,
+                    target_col,
+                    group_by_col,
+                    selected_clusters or None
+                    )
+
+                if result is not None:
+                    st.success(message)
+                    st.subheader("Analysis Results")
+                    st.dataframe(result)
+                    csv_results = result.to_csv(index=False).encode("utf-8")
+                    st.download_button("📥 Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
+                else:
+                    st.error(f"Error: {message}")
+
+            st.markdown("---")
+
+
     
-
-    numeric_cols = detect_numeric_columns(filtered_df)
-    categorical_cols = detect_categorical_columns(filtered_df)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("**Numeric Columns:**")
-        st.write(numeric_cols or "None")
-    with col2:
-        st.write("**Categorical Columns:**")
-        st.write(categorical_cols or "None")
-
-    analysis_type = st.selectbox(
-        "Select Analysis Type:",
-        ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"],
-        format_func=lambda x: {
-            "cluster_summary": "Cluster Summary",
-            "top_clusters": "Top Clusters",
-            "cluster_by_category": "Cross-Analysis",
-            "detailed_breakdown": "Full Breakdown"
-        }[x]
-        )
-
-    target_col = None
-    group_by_col = None
-
-    if numeric_cols:
-        target_col = st.selectbox("Select numeric column:", ["None"] + numeric_cols)
-        target_col = None if target_col == "None" else target_col
-
-    if analysis_type in ["cluster_by_category", "detailed_breakdown"] and categorical_cols:
-        group_by_col = st.selectbox("Group by column:", categorical_cols)
-
-    selected_clusters = st.multiselect("Filter Clusters:", sorted(filtered_df[cluster_col].unique()), default=[])
-
-    if st.button("Run Analysis"):
-        with st.spinner("Analyzing..."):
-            result, message = perform_cluster_analysis(
-                filtered_df,
-                cluster_col,
-                analysis_type,
-                target_col,
-                group_by_col,
-                selected_clusters or None
-                )
-
-            if result is not None:
-                st.success(message)
-                st.subheader("Analysis Results")
-                st.dataframe(result)
-                csv_results = result.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
-            else:
-                st.error(f"Error: {message}")
-
-        st.markdown("---")
-
     with st.expander("Period-Based Aggregation (Monthly, Quarterly, FY, CY)"):
         date_col = st.selectbox("Select Date Column (e.g. BE_Date or Month)", df_clustered.columns)
         value_col = st.selectbox("Select Value Column (e.g. Unit Price)", df_clustered.columns)
@@ -517,7 +567,181 @@ if 'df_clustered' in st.session_state:
                     else:
                         st.warning("Data not found. Please upload and process the file first.")
 
-    
+    with st.expander("📊 Comparative Quantity Analysis (Quarter-wise)"):
+    # Step 1: Ensure 'Month' is datetime
+        df_clustered["Month"] = pd.to_datetime(df_clustered["Month"], errors="coerce")
+
+        # Step 2: Select Years
+        available_years = sorted(df_clustered["Month"].dt.year.dropna().unique())
+        selected_years = st.multiselect("Select Years", available_years, default=available_years[:2])
+
+        if len(selected_years) < 2:
+            st.warning("Please select at least two years to compare.")
+        else:
+            # Step 3: Quarter Selection
+            quarter_map = {
+                "Jan - Mar": [1, 2, 3],
+                "Apr - Jun": [4, 5, 6],
+                "Jul - Sep": [7, 8, 9],
+                "Oct - Dec": [10, 11, 12]
+            }
+            selected_quarter = st.selectbox("Select Quarter", list(quarter_map.keys()))
+            selected_months = quarter_map[selected_quarter]
+
+            # Step 4: HS Code selection
+            hscode_col = "CTH_HSCODE"
+            item_col = "Item_Description_cluster"
+            quantity_col = "Quantity"
+
+            available_hscodes = sorted(df_clustered[hscode_col].dropna().unique())
+            selected_hscode = st.selectbox("Select HS Code", available_hscodes)
+
+            item_col = "Item_Description_cluster"  # change if your column is named differently
+            filtered_by_hscode = df_clustered[df_clustered[hscode_col] == selected_hscode]
+
+            # Combine HSCode + Item for dropdown display
+            filtered_by_hscode["hs_item_combo"] = (
+                filtered_by_hscode[hscode_col].astype(str) + " : " + filtered_by_hscode[item_col].astype(str)
+            )
+
+            # Get unique combos
+            combo_options = sorted(filtered_by_hscode["hs_item_combo"].dropna().unique())
+            selected_combo = st.selectbox("Select Product Description", combo_options)
+
+            # Extract actual item from selection
+            selected_item = selected_combo.split(" : ", 1)[1]
+
+            # Step 6: Filter data for selected years, HS code, product, and quarter
+            filtered_df = df_clustered[
+                (df_clustered["Month"].dt.year.isin(selected_years)) &
+                (df_clustered["Month"].dt.month.isin(selected_months)) &
+                (df_clustered[hscode_col] == selected_hscode) &
+                (df_clustered[item_col] == selected_item)
+            ]
+
+            # Step 7: Group and display comparison
+            if filtered_df.empty:
+                st.warning("No data available for the selected filters.")
+            else:
+                summary = (
+                    filtered_df.groupby(filtered_df["Month"].dt.year)[quantity_col]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"Month": "Year", quantity_col: "Total Quantity"})
+                )
+                summary.columns = ["Month", "Total Quantity"]
+
+                st.markdown("### Quarter-wise Comparative Quantity by Year")
+                st.dataframe(summary)
+
+                if len(summary) == 2:
+                    y1, y2 = summary.iloc[0]["Month"], summary.iloc[1]["Month"]
+                    q1, q2 = summary.iloc[0]["Total Quantity"], summary.iloc[1]["Total Quantity"]
+
+                    if q2 > q1:
+                        trend = "increased"
+                    elif q2 < q1:
+                        trend = "decreased"
+                    else:
+                        trend = "remained the same"
+
+                    st.markdown(f"""
+                    Between **{y1}** and **{y2}**, the quantity for product **{selected_item}** under HS Code **{selected_hscode}** 
+                    during **{selected_quarter}** has **{trend}** from **{q1:.2f}** to **{q2:.2f}**.
+                    """)
+
+    with st.expander("📊 Analysis Company Wise"):
+        df_clustered["Month"] = pd.to_datetime(df_clustered["Month"], errors="coerce")
+
+        # Step 1: Select Year and Quarter Group
+        available_years = sorted(df_clustered["Month"].dt.year.dropna().unique())
+        selected_year = st.selectbox("Select Year", available_years, key="companywise_year")
+
+        quarter_dict = {
+            "Jan–Mar": [1, 2, 3],
+            "Apr–Jun": [4, 5, 6],
+            "Jul–Sep": [7, 8, 9],
+            "Oct–Dec": [10, 11, 12]
+        }
+        quarter_label = st.selectbox("Select Quarter Group", list(quarter_dict.keys()), key="companywise_quarter")
+        selected_months = quarter_dict[quarter_label]
+
+        # Step 2: Select Trade Type
+        trade_types = df_clustered["Type"].dropna().unique()
+        selected_trade = st.selectbox("Select Trade Type", trade_types, key="companywise_trade_type")
+
+        # Step 3: Multi-select Companies
+        supplier_col = "Supplier_Name"
+        unique_companies = sorted(df_clustered[supplier_col].dropna().unique())
+        selected_companies = st.multiselect("Select Company(s)", unique_companies, key="companywise_companies")
+        df_clustered[supplier_col] = df_clustered[supplier_col].astype(str).str.strip().str.lower()
+        selected_companies = [c.strip().lower() for c in selected_companies]
+
+
+        if selected_companies:
+            df_company_filtered = df_clustered[df_clustered[supplier_col].isin(selected_companies)]
+            
+
+            # Step 4: Filter HS Codes based on selected companies
+            hscode_col = "CTH_HSCODE"
+            hs_codes_filtered = df_company_filtered[hscode_col].dropna().astype(str).unique()
+            selected_hscodes = st.multiselect("Select HS Code(s)", sorted(hs_codes_filtered), key="companywise_hscode")
+
+            if selected_hscodes:
+                df_hscode_filtered = df_company_filtered[df_company_filtered[hscode_col].astype(str).isin(selected_hscodes)]
+
+                # Step 5: Product combo filtering
+                item_col = "Item_Description_cluster"
+                df_hscode_filtered["hs_item_combo"] = (
+                    df_hscode_filtered[hscode_col].astype(str) + " : " + df_hscode_filtered[item_col].astype(str)
+                )
+                combo_options = sorted(df_hscode_filtered["hs_item_combo"].dropna().unique())
+                selected_combos = st.multiselect("Select HS Code + Product(s)", combo_options, key="companywise_combo")
+
+                selected_items = [combo.split(" : ", 1)[1] for combo in selected_combos]
+
+                # Step 6: Filter for all selections
+                final_filtered = df_clustered[
+                    (df_clustered["Month"].dt.year == selected_year) &
+                    (df_clustered["Month"].dt.month.isin(selected_months)) &
+                    (df_clustered["Type"] == selected_trade) &
+                    (df_clustered[supplier_col].isin(selected_companies)) &
+                    (df_clustered[hscode_col].astype(str).isin(selected_hscodes)) &
+                    (df_clustered[item_col].isin(selected_items))
+                ]
+
+                if final_filtered.empty:
+                    st.warning("No matching records found.")
+                else:
+                    st.markdown("### 📊 Filtered Results")
+                    st.dataframe(final_filtered)
+
+                    st.markdown("### 📝 Company-wise Summary")
+                    for company in selected_companies:
+                        company_df = final_filtered[final_filtered[supplier_col] == company]
+
+                        if not company_df.empty:
+                            avg_price = company_df["Unit_Price_USD"].mean()
+                            total_qty = company_df["Quantity"].sum()
+                            hs_used = sorted(company_df[hscode_col].astype(str).unique())
+                            items_used = sorted(company_df[item_col].astype(str).unique())
+
+                            st.markdown(f"""
+                            **📌 Summary for `{company}`**  
+                            - Year: **{selected_year}**, Quarter: **{quarter_label}**  
+                            - HS Code(s): **{', '.join(hs_used)}**  
+                            - Product(s): **{', '.join(items_used)}**  
+                            - Trade Type: **{selected_trade}**  
+                            - 🔄 Total Quantity: **{total_qty:,.2f}**  
+                            - 💵 Average Unit Price (USD): **{avg_price:,.2f}**
+                            """)
+                        else:
+                            st.info(f"No data found for company: {company}")
+            else:
+                st.info("Please select at least one HS Code.")
+        else:
+            st.info("Please select at least one company.")
+
 
 
         # Business Questions
