@@ -18,7 +18,9 @@ from data_cleaning import (
     drop_unwanted_columns,
     convert_month_column_to_datetime,
     clean_supplier_name, 
-    cluster_supplier_names
+    cluster_supplier_names,
+    cluster_location_column,
+    clean_location_name
 )
 
 from clustering import (
@@ -130,6 +132,11 @@ if 'df_original' in st.session_state:
                 df_final = cluster_supplier_names(df_final, supplier_column=supplier_column)
                 st.success("Supplier names clustered successfully.")
 
+            importer_city_col = df_col_map.get("importer_city_state")
+            if importer_city_col:
+                df_final = cluster_location_column(df_final, column=importer_city_col)
+                st.success("Importer city-state values clustered successfully.")
+
         # Store in session state
             st.session_state["df_final"] = df_final
             st.session_state["converted_rows"] = converted_rows
@@ -172,12 +179,12 @@ if 'df_clustered' in st.session_state:
     cluster_col = f"{cluster_column}_cluster"
 
     st.subheader("Clustered Data")
-    st.dataframe(df_clustered[[cluster_column, cluster_col]].head(20))
+    st.dataframe(df_clustered[[cluster_column, cluster_col]].head(5))
 
     cluster_counts = df_clustered[cluster_col].value_counts()
     st.subheader("Cluster Summary")
     st.write(f"Total unique clusters: {len(cluster_counts)}")
-    st.dataframe(cluster_counts.head(10).to_frame("Count"))
+    st.dataframe(cluster_counts.head(3).to_frame("Count"))
 
     csv_clustered = df_clustered.to_csv(index=False).encode('utf-8')
     st.download_button(
@@ -211,16 +218,17 @@ if 'df_clustered' in st.session_state:
     st.subheader("Data Analytics & Insights")
 
  # --- Trade Filters Section ---
-    with st.expander("Filter Trade Data"):
+    with st.expander(" Filter & Analyze Trade Data"):
         def clean_list(series):
             return sorted(set(s.strip().lower() for s in series.dropna().unique() if isinstance(s, str)))
 
+        def clean_unique_options(series):
+            return sorted(set(str(val).strip().lower().replace(" ,", ",").replace(", ", ",") for val in series.dropna()))
+
+        # --- Initial Filters ---
         trade_type_col = st.selectbox("Select Trade Type Column (e.g. Import/Export)", df_clustered.columns)
         importer_country_col = st.selectbox("Select Importer Country Column", df_clustered.columns)
         supplier_country_col = st.selectbox("Select Supplier Country Column", df_clustered.columns)
-
-        def clean_unique_options(series):
-            return sorted(set(str(val).strip().lower().replace(" ,", ",").replace(", ", ",") for val in series.dropna()))
 
         trade_type_options = clean_unique_options(df_clustered[trade_type_col])
         importer_options = clean_unique_options(df_clustered[importer_country_col])
@@ -230,88 +238,82 @@ if 'df_clustered' in st.session_state:
         selected_importer = st.multiselect("Filter by Importer City/State", ["All"] + importer_options, default=["All"])
         selected_supplier = st.multiselect("Filter by Supplier Country", ["All"] + supplier_options, default=["All"])
 
-    # Apply the main filters first
         filtered_df = filter_trade_data(
-        df_clustered.copy(),
-        trade_type_col,
-        importer_country_col,
-        supplier_country_col,
-        selected_trade_type if selected_trade_type != "All" else None,
-        selected_importer if selected_importer != ["All"] else None,
-        selected_supplier if selected_supplier != ["All"] else None,
-    )
+            df_clustered.copy(),
+            trade_type_col,
+            importer_country_col,
+            supplier_country_col,
+            selected_trade_type if selected_trade_type != "All" else None,
+            selected_importer if selected_importer != ["All"] else None,
+            selected_supplier if selected_supplier != ["All"] else None,
+        )
 
-    # --- Time-Based Filtering Section ---
-        st.markdown("### Period-Based Aggregation")
-        st.info("Date Column is assumed to be `Month`")
+        # --- Time-Based Aggregation ---
+        st.markdown("### 📅 Period-Based Aggregation")
+        st.info("Date Column assumed to be `Month`")
+
         month_col = "Month"
-
         value_cols = filtered_df.select_dtypes(include='number').columns.tolist()
         selected_value_col = st.selectbox("Select Value Column", value_cols, key="value_col_select")
         aggregation_type = st.selectbox("Choose Aggregation Type", ["Monthly", "Quarterly", "Financial Year", "Calendar Year"], key="aggregation_type_select")
 
         filtered_by_time_df = filtered_df.copy()
 
-        if aggregation_type == "Monthly":
-            unique_months = sorted(filtered_df[month_col].dropna().unique())
-            selected_month = st.selectbox("Select Month", unique_months,key="month_select")
-            filtered_by_time_df = filtered_df[filtered_df[month_col] == selected_month]
+        try:
+            if aggregation_type == "Monthly":
+                unique_months = sorted(filtered_df[month_col].dropna().unique())
+                selected_month = st.selectbox("Select Month", unique_months, key="month_select")
+                filtered_by_time_df = filtered_df[filtered_df[month_col] == selected_month]
 
-        elif aggregation_type == "Quarterly":
-            try:
+            elif aggregation_type == "Quarterly":
                 df_temp = filtered_df.copy()
                 df_temp[month_col] = pd.to_datetime(df_temp[month_col])
                 df_temp["Quarter"] = df_temp[month_col].dt.to_period("Q").astype(str)
                 unique_quarters = sorted(df_temp["Quarter"].dropna().unique())
-                selected_quarter = st.selectbox("Select Quarter", unique_quarters,key="quarter_select")
+                selected_quarter = st.selectbox("Select Quarter", unique_quarters, key="quarter_select")
                 filtered_by_time_df = df_temp[df_temp["Quarter"] == selected_quarter]
-            except Exception as e:
-                st.warning(f"Quarterly parsing failed: {e}")
 
-        elif aggregation_type == "Financial Year":
-            df_temp = filtered_df.copy()
-            df_temp[month_col] = pd.to_datetime(df_temp[month_col], errors='coerce')
-            df_temp["FY"] = df_temp[month_col].apply(lambda x: f"{x.year - 1}-{x.year}" if x.month <= 3 else f"{x.year}-{x.year + 1}")
-            unique_fys = sorted(df_temp["FY"].dropna().unique())
-            selected_fy = st.selectbox("Select Financial Year", unique_fys,key="fy_select")
-            filtered_by_time_df = df_temp[df_temp["FY"] == selected_fy]
+            elif aggregation_type == "Financial Year":
+                df_temp = filtered_df.copy()
+                df_temp[month_col] = pd.to_datetime(df_temp[month_col], errors='coerce')
+                df_temp["FY"] = df_temp[month_col].apply(lambda x: f"{x.year - 1}-{x.year}" if x.month <= 3 else f"{x.year}-{x.year + 1}")
+                unique_fys = sorted(df_temp["FY"].dropna().unique())
+                selected_fy = st.selectbox("Select Financial Year", unique_fys, key="fy_select")
+                filtered_by_time_df = df_temp[df_temp["FY"] == selected_fy]
 
-        elif aggregation_type == "Calendar Year":
-            df_temp = filtered_df.copy()
-            df_temp[month_col] = pd.to_datetime(df_temp[month_col], errors='coerce')
-            df_temp["Year"] = df_temp[month_col].dt.year
-            unique_years = sorted(df_temp["Year"].dropna().unique())
-            selected_year = st.selectbox("Select Calendar Year", unique_years,key="year_select")
-            filtered_by_time_df = df_temp[df_temp["Year"] == selected_year]
+            elif aggregation_type == "Calendar Year":
+                df_temp = filtered_df.copy()
+                df_temp[month_col] = pd.to_datetime(df_temp[month_col], errors='coerce')
+                df_temp["Year"] = df_temp[month_col].dt.year
+                unique_years = sorted(df_temp["Year"].dropna().unique())
+                selected_year = st.selectbox("Select Calendar Year", unique_years, key="year_select")
+                filtered_by_time_df = df_temp[df_temp["Year"] == selected_year]
+        except Exception as e:
+            st.warning(f"Aggregation processing error: {e}")
 
-    # --- Filter by CTH_HSCODE ---
-        # Step 1: Detect and normalize column names
+        # --- Filter by Year, HS Code, Item Description ---
         columns_lower = [col.lower() for col in filtered_df.columns]
         col_map = {col.lower(): col for col in filtered_df.columns}
 
-        # Step 2: Handle year filtering from either 'YEAR' or 'Month'
+        # Year
         if "year" in columns_lower:
             year_col = col_map["year"]
             filtered_df[year_col] = filtered_df[year_col].astype(int)
+        elif "month" in columns_lower:
+            month_col = col_map["month"]
+            filtered_df[month_col] = pd.to_datetime(filtered_df[month_col], errors="coerce")
+            filtered_df["year_extracted"] = filtered_df[month_col].dt.year
+            year_col = "year_extracted"
         else:
-            if "month" in columns_lower:
-                month_col = col_map["month"]
-                filtered_df[month_col] = pd.to_datetime(filtered_df[month_col], errors="coerce")
-                filtered_df["year_extracted"] = filtered_df[month_col].dt.year
-                year_col = "year_extracted"
-            else:
-                year_col = None
+            year_col = None
 
         if year_col:
             unique_years = sorted(filtered_df[year_col].dropna().unique())
             selected_years = st.multiselect("Filter by Year", ["All"] + list(map(str, unique_years)), default=["All"])
-            if "All" not in selected_years:
-                selected_years_int = list(map(int, selected_years))
-                filtered_df = filtered_df[filtered_df[year_col].isin(selected_years_int)]
-            else:
-                selected_years_int = unique_years
+            selected_years_int = unique_years if "All" in selected_years else list(map(int, selected_years))
+            filtered_df = filtered_df[filtered_df[year_col].isin(selected_years_int)]
 
-        # Step 3: Filter by HS Code
+        # HS Code
         if "cth_hscode" in columns_lower:
             cth_col = col_map["cth_hscode"]
             cth_hscode_options = sorted(filtered_df[cth_col].dropna().astype(str).unique())
@@ -319,58 +321,44 @@ if 'df_clustered' in st.session_state:
             if "All" not in selected_cth:
                 filtered_df = filtered_df[filtered_df[cth_col].astype(str).isin(selected_cth)]
 
-        # Step 4: Filter by HSCode + Item Description Combo
+        # HS Code + Item Description
         if "item_description" in columns_lower and "cth_hscode" in columns_lower:
             item_col = col_map["item_description"]
             cth_col = col_map["cth_hscode"]
-
             filtered_df["hs_desc_combo"] = (
                 filtered_df[cth_col].astype(str) + " : " + filtered_df[item_col].astype(str)
             )
-
             item_combo_options = sorted(filtered_df["hs_desc_combo"].dropna().unique())
             selected_combos = st.multiselect("Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
 
-            if "All" not in selected_combos:
-                selected_descriptions = [combo.split(" : ", 1)[1] for combo in selected_combos]
-                filtered_df = filtered_df[filtered_df[item_col].isin(selected_descriptions)]
-            else:
-                selected_descriptions = filtered_df[item_col].dropna().unique().tolist()
+            selected_descriptions = (
+                filtered_df[item_col].dropna().unique().tolist()
+                if "All" in selected_combos else
+                [combo.split(" : ", 1)[1] for combo in selected_combos]
+            )
+            filtered_df = filtered_df[filtered_df[item_col].isin(selected_descriptions)]
 
-        # Step 5: Show filters summary
-        #st.markdown("### 🧮 Selected Filters Summary")
-        #st.write(f"**Years:** {selected_years}")
-        #st.write(f"**HS Codes:** {selected_cth if 'selected_cth' in locals() else 'All'}")
-        #st.write(f"**Item Descriptions:** {selected_descriptions }")
-
-        # Step 6: Trigger analyze_trend automatically for multiple products
-        if (not filtered_df.empty and selected_descriptions and len(selected_years_int) >= 2):
-            trade_type = selected_trade_type if 'selected_trade_type' in locals() else "Imports"
-            st.markdown("#### 🧪 Analysis Results")
-
+        # --- Display Results and Trend ---
+        if not filtered_df.empty and selected_descriptions and len(selected_years_int) >= 2:
+            st.markdown("#### 📈 Trend Analysis")
+            trade_type = selected_trade_type
             for product_name in selected_descriptions:
                 try:
                     result = analyze_trend(df, trade_type, product_name, selected_years_int)
-                    if result:  # only display if result is not empty
+                    if result:
                         st.markdown(f"- **{product_name}**: {result}")
                 except Exception:
-                    # Silently ignore if trend analysis fails
                     pass
 
             st.dataframe(filtered_by_time_df)
 
             csv_filtered = filtered_by_time_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "📥 Download Filtered Data",
-                csv_filtered,
-                "filtered_trade_data.csv",
-                "text/csv"
-            )
+            st.download_button("📥 Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
 
-            # --- Time-Based Aggregation ---
-            if st.button("🧮 Compute Time-Based Averages for Filtered Data"):
+            # Time-based Aggregation Button
+            if st.button("🧮 Compute Time-Based Averages"):
                 from analysis import full_periodic_analysis
-                with st.spinner("Computing Aggregations..."):
+                with st.spinner("Computing..."):
                     try:
                         results, msg = full_periodic_analysis(filtered_by_time_df, "Month", selected_value_col)
                         if results:
@@ -378,36 +366,26 @@ if 'df_clustered' in st.session_state:
                             for label, table in results.items():
                                 st.subheader(label)
                                 st.dataframe(table)
-                                st.download_button(
-                                    f"📥 Download {label}",
-                                    table.to_csv(index=False),
-                                    f"{label.lower().replace(' ', '_')}.csv"
-                                )
+                                st.download_button(f"📥 Download {label}", table.to_csv(index=False), f"{label.lower().replace(' ', '_')}.csv")
                         else:
                             st.error(msg)
-                    except Exception as e:
-                        st.error(f"Aggregation failed.")
+                    except Exception:
+                        st.error("Aggregation failed.")
 
+            # --- Trade Data Summary Analysis ---
+            st.markdown("### 📦 Trade Summary Analysis")
+            string_cols = filtered_by_time_df.select_dtypes(include='object').columns.tolist()
+            numeric_cols = filtered_by_time_df.select_dtypes(include='number').columns.tolist()
 
-        # --- Trade Analysis ---
-    with st.expander("Trade Data Analysis"):
-        st.markdown("### Trade Data Analysis")
-        string_cols = filtered_by_time_df.select_dtypes(include='object').columns.tolist()
-        numeric_cols = filtered_by_time_df.select_dtypes(include='number').columns.tolist()
-            
+            if string_cols and numeric_cols:
+                product_col = st.selectbox("Select Product Column", string_cols, key="product_col")
+                quantity_col = st.selectbox("Select Quantity Column", numeric_cols, key="quantity_col")
+                value_col = st.selectbox("Select Value Column", numeric_cols, key="value_col_analysis")
+                importer_col = st.selectbox("Select Importer Column", string_cols, key="importer_col")
+                supplier_col = st.selectbox("Select Supplier Column", string_cols, key="supplier_col")
 
-        st.write("String Columns:", string_cols)
-        st.write("Numeric Columns:", numeric_cols)
-
-        if string_cols and numeric_cols:
-            product_col = st.selectbox("Select Product Column", string_cols,key="product_col")
-            quantity_col = st.selectbox("Select Quantity Column", numeric_cols, key="quantity_col")
-            value_col = st.selectbox("Select Value Column", numeric_cols,key="value_col_analysis")
-            importer_col = st.selectbox("Select Importer Column", string_cols, key="importer_col")
-            supplier_col = st.selectbox("Select Supplier Column", string_cols, key="supplier_col")
-
-            from analysis import perform_trade_analysis
-            try:
+                from analysis import perform_trade_analysis
+                try:
                     analysis_results = perform_trade_analysis(
                         filtered_by_time_df,
                         product_col,
@@ -416,20 +394,19 @@ if 'df_clustered' in st.session_state:
                         importer_col,
                         supplier_col
                     )
-            except Exception as e:
-                st.error(f"Error during trade analysis: {e}")
-                st.stop()
-
-            if "error" in analysis_results:
-                st.error(analysis_results["error"])
+                    if "error" in analysis_results:
+                        st.error(analysis_results["error"])
+                    else:
+                        for section, df_section in analysis_results.items():
+                            st.subheader(section)
+                            st.dataframe(df_section)
+                            if not df_section.empty:
+                                st.bar_chart(df_section.set_index(df_section.columns[0]))
+                except Exception as e:
+                    st.error(f"Error during trade analysis.")
             else:
-                for section, df_section in analysis_results.items():
-                    st.subheader(section)
-                    st.dataframe(df_section)
-                    if not df_section.empty:
-                        st.bar_chart(df_section.set_index(df_section.columns[0]))
-        else:
-            st.warning("Not enough string or numeric columns in the filtered data.")
+                st.warning("Not enough string or numeric columns to proceed.")
+
 
         
 

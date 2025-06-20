@@ -448,3 +448,63 @@ def cluster_supplier_names(df, supplier_column="Supplier_Name", threshold=90):
 
     df[supplier_column] = df[supplier_column].map(name_to_cluster).fillna(df[supplier_column])
     return df
+
+
+
+def clean_location_name(name):
+    """
+    Normalize and clean a city-state string.
+    Example: "pune/mah" → "pune maharashtra"
+    """
+    name = str(name).lower().strip()
+
+    # Replace known separators with space
+    name = name.replace("/", " ").replace("\\", " ").replace("-", " ")
+
+    # Fix common state abbreviations
+    state_map = {
+        "mah": "maharashtra",
+        "wb": "west bengal",
+        "tn": "tamil nadu",
+        "kl": "kerala",
+        "up": "uttar pradesh",
+        "ap": "andhra pradesh"
+        # Add more if needed
+    }
+
+    for abbr, full in state_map.items():
+        name = re.sub(rf"\b{abbr}\b", full, name)
+
+    # Remove special characters and extra spaces
+    name = re.sub(r'[^a-z\s]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+
+    return name
+
+
+def cluster_location_column(df, column="Importer_City_State", threshold=90):
+    """
+    Cluster and replace messy city-state strings using fuzzy matching.
+    """
+    if column not in df.columns:
+        return df
+
+    unique_values = df[column].dropna().unique()
+    canonical_names = []
+    clusters = []
+    value_to_cluster = {}
+
+    for val in unique_values:
+        cleaned = clean_location_name(val)
+        matched = False
+        for canon in canonical_names:
+            if fuzz.token_sort_ratio(cleaned, canon) > threshold:
+                value_to_cluster[val] = canon
+                matched = True
+                break
+        if not matched:
+            canonical_names.append(cleaned)
+            value_to_cluster[val] = cleaned
+
+    df[column] = df[column].map(value_to_cluster).fillna(df[column])
+    return df
