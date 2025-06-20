@@ -304,7 +304,7 @@ if 'df_clustered' in st.session_state:
 
         if year_col:
             unique_years = sorted(filtered_df[year_col].dropna().unique())
-            selected_years = st.multiselect("📅 Filter by Year", ["All"] + list(map(str, unique_years)), default=["All"])
+            selected_years = st.multiselect("Filter by Year", ["All"] + list(map(str, unique_years)), default=["All"])
             if "All" not in selected_years:
                 selected_years_int = list(map(int, selected_years))
                 filtered_df = filtered_df[filtered_df[year_col].isin(selected_years_int)]
@@ -315,7 +315,7 @@ if 'df_clustered' in st.session_state:
         if "cth_hscode" in columns_lower:
             cth_col = col_map["cth_hscode"]
             cth_hscode_options = sorted(filtered_df[cth_col].dropna().astype(str).unique())
-            selected_cth = st.multiselect("🔢 Filter by CTH_HSCODE", ["All"] + cth_hscode_options, default=["All"])
+            selected_cth = st.multiselect("Filter by CTH_HSCODE", ["All"] + cth_hscode_options, default=["All"])
             if "All" not in selected_cth:
                 filtered_df = filtered_df[filtered_df[cth_col].astype(str).isin(selected_cth)]
 
@@ -329,7 +329,7 @@ if 'df_clustered' in st.session_state:
             )
 
             item_combo_options = sorted(filtered_df["hs_desc_combo"].dropna().unique())
-            selected_combos = st.multiselect("🧾 Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
+            selected_combos = st.multiselect("Filter by Item Description + HSCode", ["All"] + item_combo_options, default=["All"])
 
             if "All" not in selected_combos:
                 selected_descriptions = [combo.split(" : ", 1)[1] for combo in selected_combos]
@@ -347,14 +347,14 @@ if 'df_clustered' in st.session_state:
         if not filtered_df.empty and selected_descriptions and len(selected_years_int) >= 2:
             trade_type = selected_trade_type if 'selected_trade_type' in locals() else "Imports"
             
-            st.markdown("#### 📈 Analysis Results")
+            st.markdown("#### Analysis Results")
 
             for product_name in selected_descriptions:
                 try:
                     result = analyze_trend(df, trade_type, product_name, selected_years_int)
                     st.markdown(f"- **{product_name}**: {result}")
                 except Exception as e:
-                    st.warning(f"⚠️ Could not analyze trend for {product_name}: {e}")
+                    st.warning(f" Could not analyze trend for {product_name}: {e}")
             st.dataframe(filtered_by_time_df)
             csv_filtered = filtered_by_time_df.to_csv(index=False).encode("utf-8")
             st.download_button("Download Filtered Data", csv_filtered, "filtered_trade_data.csv", "text/csv")
@@ -477,7 +477,7 @@ if 'df_clustered' in st.session_state:
                     st.subheader("Analysis Results")
                     st.dataframe(result)
                     csv_results = result.to_csv(index=False).encode("utf-8")
-                    st.download_button("📥 Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
+                    st.download_button("Download Results", csv_results, f"analysis_{analysis_type}.csv", "text/csv")
                 else:
                     st.error(f"Error: {message}")
 
@@ -517,7 +517,7 @@ if 'df_clustered' in st.session_state:
                     st.error(msg)
 
     with st.expander("📈 Forecast Product Price or Quantity"):
-        st.markdown("Select an item and the metric you'd like to forecast.")
+        st.markdown("Select an HS Code and the product you'd like to forecast.")
 
         if 'df_clustered' in st.session_state:
             df_clustered = st.session_state["df_clustered"]
@@ -526,24 +526,43 @@ if 'df_clustered' in st.session_state:
             if cluster_col not in df_clustered.columns:
                 st.error(f"Column `{cluster_col}` not found in the dataset.")
             else:
-            # Only include clusters with enough data
-                valid_counts = df_clustered[cluster_col].value_counts()
-                valid_items = valid_counts[valid_counts > 6].index.tolist()
+                # Normalize HSCODE column
+                hscode_col = "CTH_HSCODE"
+                item_col = "Item_Description_cluster"
+                month_col = "Month"  # Ensure this is datetime64[ns]
+
+                df_clustered[month_col] = pd.to_datetime(df_clustered[month_col], errors='coerce')
+
+                # Step 1: Select HS Code
+                unique_hscodes = sorted(df_clustered[hscode_col].dropna().unique())
+                selected_hscode = st.selectbox("Select HS Code", unique_hscodes, key="forecast_hscode")
+
+                # Step 2: Filter by selected HSCODE
+                hscode_filtered = df_clustered[df_clustered[hscode_col] == selected_hscode].copy()
+
+                # Step 3: Build list of products with >= 6 unique months
+                valid_items = []
+                for item in hscode_filtered[item_col].dropna().unique():
+                    months_present = hscode_filtered[hscode_filtered[item_col] == item][month_col].dt.to_period("M").nunique()
+                    if months_present >= 6:
+                        valid_items.append(item)
 
                 if not valid_items:
-                    st.warning("No items with sufficient data (more than 6 rows) to forecast.")
+                    st.warning("No products with 6 or more months of data for the selected HS Code.")
                 else:
-                    item_selected = st.selectbox("Choose Item", sorted(valid_items), key="forecast_item")
+                    # Step 4: Select Product and Forecast Column
+                    item_selected = st.selectbox("Choose Product", sorted(valid_items), key="forecast_item")
+
                     column_choice = st.selectbox(
-                    "Column to Forecast", 
-                    ["Quantity", "Unit_Price_USD", "Total_Ass_Value_USD"], 
-                    key="forecast_metric"
-                )
+                        "Column to Forecast",
+                        ["Quantity", "Unit_Price_USD", "Total_Ass_Value_USD"],
+                        key="forecast_metric"
+                    )
 
                     if st.button("Run Forecast", key="run_forecast_btn"):
-                          # Ensure this is correctly defined in your analysis.py
+                        from forecasting import forecast_item  # ensure this function is defined
 
-                        forecast_df, description, plot_buf = forecast_item(df_clustered, item_selected, column_choice, cluster_col)
+                        forecast_df, description, plot_buf = forecast_item(hscode_filtered, item_selected, column_choice, cluster_col)
 
                         if isinstance(description, str) and "error" in description.lower():
                             st.error(description)
@@ -552,22 +571,19 @@ if 'df_clustered' in st.session_state:
                             st.dataframe(forecast_df)
 
                             st.markdown(f"📊 **Trend Insight:** {description}")
-
-                            st.image(plot_buf, caption="Historical (green) vs Forecast (red)",  use_container_width=True)
+                            st.image(plot_buf, caption="Historical (green) vs Forecast (red)", use_container_width=True)
 
                             st.download_button(
-        label="Download Forecast CSV",
-        data=forecast_df.to_csv(index=False),
-        file_name=f"{item_selected}_{column_choice}_forecast.csv",
-        mime="text/csv"
-    )
+                                label="Download Forecast CSV",
+                                data=forecast_df.to_csv(index=False),
+                                file_name=f"{item_selected}_{column_choice}_forecast.csv",
+                                mime="text/csv"
+                            )
                         else:
                             st.warning(description)
 
-                    else:
-                        st.warning("Data not found. Please upload and process the file first.")
 
-    with st.expander("📊 Comparative Quantity Analysis (Quarter-wise)"):
+    with st.expander("Comparative Quantity Analysis (Quarter-wise)"):
     # Step 1: Ensure 'Month' is datetime
         df_clustered["Month"] = pd.to_datetime(df_clustered["Month"], errors="coerce")
 
@@ -650,7 +666,7 @@ if 'df_clustered' in st.session_state:
                     during **{selected_quarter}** has **{trend}** from **{q1:.2f}** to **{q2:.2f}**.
                     """)
 
-    with st.expander("📊 Analysis Company Wise"):
+    with st.expander("Analysis Company Wise"):
         df_clustered["Month"] = pd.to_datetime(df_clustered["Month"], errors="coerce")
 
         # Step 1: Select Year and Quarter Group
@@ -713,10 +729,10 @@ if 'df_clustered' in st.session_state:
                 if final_filtered.empty:
                     st.warning("No matching records found.")
                 else:
-                    st.markdown("### 📊 Filtered Results")
+                    st.markdown("### Filtered Results")
                     st.dataframe(final_filtered)
 
-                    st.markdown("### 📝 Company-wise Summary")
+                    st.markdown("### Company-wise Summary")
                     for company in selected_companies:
                         company_df = final_filtered[final_filtered[supplier_col] == company]
 
@@ -727,13 +743,13 @@ if 'df_clustered' in st.session_state:
                             items_used = sorted(company_df[item_col].astype(str).unique())
 
                             st.markdown(f"""
-                            **📌 Summary for `{company}`**  
+                            **Summary for `{company}`**  
                             - Year: **{selected_year}**, Quarter: **{quarter_label}**  
                             - HS Code(s): **{', '.join(hs_used)}**  
                             - Product(s): **{', '.join(items_used)}**  
                             - Trade Type: **{selected_trade}**  
-                            - 🔄 Total Quantity: **{total_qty:,.2f}**  
-                            - 💵 Average Unit Price (USD): **{avg_price:,.2f}**
+                            - Total Quantity: **{total_qty:,.2f}**  
+                            - Average Unit Price (USD): **{avg_price:,.2f}**
                             """)
                         else:
                             st.info(f"No data found for company: {company}")
