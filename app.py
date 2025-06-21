@@ -338,6 +338,7 @@ if 'df_clustered' in st.session_state:
                         st.dataframe(df_result)
                         if df_result.shape[0] > 1 and df_result.select_dtypes(include='number').shape[1] >= 1:
                             st.bar_chart(df_result.set_index(df_result.columns[0]))
+                        
         else:
             st.warning("Not enough string or numeric columns to proceed.")
     
