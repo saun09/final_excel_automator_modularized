@@ -222,7 +222,7 @@ if 'df_clustered' in st.session_state:
     st.subheader("Data Analytics & Insights")
 
  # --- Trade Filters Section ---
-    with st.expander("🔍 Filter & Analyze Trade Data"):
+    with st.expander("Filter & Analyze Trade Data"):
         def clean_unique(series):
             return sorted(set(str(x).strip().lower() for x in series.dropna()))
 
@@ -308,7 +308,7 @@ if 'df_clustered' in st.session_state:
 
 
         # ========== CUSTOM ANALYSIS ==========
-        st.markdown("### 📊 Trade Summary Analysis")
+        st.markdown("### Trade Summary Analysis")
         string_cols = df_filtered.select_dtypes(include="object").columns.tolist()
         numeric_cols = df_filtered.select_dtypes(include="number").columns.tolist()
 
@@ -319,7 +319,7 @@ if 'df_clustered' in st.session_state:
             importer_col = importer_country_col
             supplier_col = supplier_country_col
 
-            if st.button("🔎 Run Full Trade Analysis"):
+            if st.button("" Run Full Trade Analysis"):
                 insights = perform_trade_analysis(
                     df_filtered,
                     product_col=product_col,
@@ -476,7 +476,7 @@ if 'df_clustered' in st.session_state:
                         .rename(columns={quantity_col: "Total Quantity"})
                     )
 
-                    st.markdown("### 📊 Comparative Quantity by Year and Quarter")
+                    st.markdown("### Comparative Quantity by Year and Quarter")
                     st.dataframe(summary)
 
                     # Optional: Show basic trend
@@ -499,7 +499,7 @@ if 'df_clustered' in st.session_state:
                             """)
 
 
-    with st.expander("📊 Analysis Company Wise"):
+    with st.expander(" Analysis Company Wise"):
         df_clustered["Month"] = pd.to_datetime(df_clustered["Month"], errors="coerce")
 
         # Step 1: Select Year and Quarter Group(s)
@@ -693,7 +693,7 @@ if 'df_clustered' in st.session_state:
         st.warning("No data matches the selected filters.")
 
      # DATA ANALYTICS SECTION
-    st.subheader("📊 Data Analytics & Insights")
+    st.subheader("Data Analytics & Insights")
     st.write("Query your clustered data to get analytical insights:")
     
     # Detect column types for better user experience
@@ -721,10 +721,10 @@ if 'df_clustered' in st.session_state:
             "detailed_breakdown"
         ],
         format_func=lambda x: {
-            "cluster_summary": "📈 Cluster Summary (Total records, sums, averages)",
-            "top_clusters": "🏆 Top Clusters (Ranked by selected metric)",
-            "cluster_by_category": "📊 Cross-Analysis (Clusters vs Categories)",
-            "detailed_breakdown": "🔍 Detailed Breakdown (Complete analysis by category)"
+            "cluster_summary": " Cluster Summary (Total records, sums, averages)",
+            "top_clusters": " Top Clusters (Ranked by selected metric)",
+            "cluster_by_category": "Cross-Analysis (Clusters vs Categories)",
+            "detailed_breakdown": "Detailed Breakdown (Complete analysis by category)"
         }[x]
     )
     
@@ -779,7 +779,7 @@ if 'df_clustered' in st.session_state:
                 # Download results
                 csv_results = result.to_csv().encode('utf-8')
                 st.download_button(
-                    label="📥 Download Analysis Results",
+                    label="Download Analysis Results",
                     data=csv_results,
                     file_name=f"analysis_{analysis_type}.csv",
                     mime="text/csv"
@@ -794,7 +794,7 @@ if 'df_clustered' in st.session_state:
     
     # Quick insights section
     if 'analysis_results' in st.session_state:
-        st.subheader("💡 Quick Insights")
+        st.subheader(" Quick Insights")
         result = st.session_state['analysis_results']
         analysis_type = st.session_state['analysis_type']
         
@@ -811,7 +811,7 @@ if 'df_clustered' in st.session_state:
             st.write(f"**Bottom Performing Cluster:** {result.index[-1]} ({result.iloc[-1, 0]:,.2f})")
 
     # DATA GROUPING SECTION
-    st.subheader("📊 Data Grouping")
+    st.subheader("Data Grouping")
     st.write("Group your data by categorical columns to analyze patterns:")
     
     # Grouping interface
@@ -859,7 +859,7 @@ if 'df_clustered' in st.session_state:
                 # Download results
                 csv_grouped = grouped_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Download Grouped Data",
+                    label="Download Grouped Data",
                     data=csv_grouped,
                     file_name="grouped_data.csv",
                     mime="text/csv"
