@@ -20,7 +20,8 @@ from data_cleaning import (
     clean_supplier_name, 
     cluster_supplier_names,
     cluster_location_column,
-    clean_location_name
+    clean_location_name,
+    detect_categorical_columns
 )
 
 from clustering import (
@@ -572,7 +573,7 @@ if 'df_clustered' in st.session_state:
                             st.warning(description)
 
 
-    with st.expander("📈 Comparative Quantity Analysis (Multi-Quarter Wise)"):
+    with st.expander(" Comparative Quantity Analysis (Multi-Quarter Wise)"):
     # Step 1: Ensure 'Month' is datetime
         df_clustered["Month"] = pd.to_datetime(df_clustered["Month"], errors="coerce")
 
@@ -836,3 +837,188 @@ if 'df_clustered' in st.session_state:
                 st.error(f"Error while processing question: {e}")
     else:
         st.warning("No data matches the selected filters.")
+
+     # DATA ANALYTICS SECTION
+    st.subheader("📊 Data Analytics & Insights")
+    st.write("Query your clustered data to get analytical insights:")
+    
+    # Detect column types for better user experience
+    numeric_cols = detect_numeric_columns(df_clustered)
+    categorical_cols = detect_categorical_columns(df_clustered)
+    
+    # Analytics interface
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Available Numeric Columns (for calculations):**")
+        st.write(numeric_cols if numeric_cols else "No numeric columns detected")
+        
+    with col2:
+        st.write("**Available Categorical Columns (for grouping):**")
+        st.write(categorical_cols if categorical_cols else "No categorical columns detected")
+    
+    # Analysis type selection
+    analysis_type = st.selectbox(
+        "Select Analysis Type:",
+        [
+            "cluster_summary",
+            "top_clusters", 
+            "cluster_by_category",
+            "detailed_breakdown"
+        ],
+        format_func=lambda x: {
+            "cluster_summary": "📈 Cluster Summary (Total records, sums, averages)",
+            "top_clusters": "🏆 Top Clusters (Ranked by selected metric)",
+            "cluster_by_category": "📊 Cross-Analysis (Clusters vs Categories)",
+            "detailed_breakdown": "🔍 Detailed Breakdown (Complete analysis by category)"
+        }[x]
+    )
+    
+    # Dynamic input fields based on analysis type
+    target_col = None
+    group_by_col = None
+    selected_clusters = None
+    
+    if analysis_type in ["cluster_summary", "top_clusters", "cluster_by_category", "detailed_breakdown"]:
+        if numeric_cols:
+            target_col = st.selectbox(
+                "Select Numeric Column for Calculations (optional):",
+                ["None"] + numeric_cols
+            )
+            target_col = None if target_col == "None" else target_col
+    
+    if analysis_type in ["cluster_by_category", "detailed_breakdown"]:
+        if categorical_cols:
+            group_by_col = st.selectbox(
+                "Group By Column:",
+                categorical_cols
+            )
+    
+    # Cluster selection
+    all_clusters = sorted(df_clustered[cluster_col].unique())
+    selected_clusters = st.multiselect(
+        "Select Specific Clusters (leave empty for all):",
+        all_clusters,
+        default=[]
+    )
+    
+    if not selected_clusters:
+        selected_clusters = None
+    
+    # Run analysis button
+    if st.button("🔍 Run Analysis", key="run_analysis"):
+        with st.spinner("Analyzing data..."):
+            result, message = perform_cluster_analysis(
+                df_clustered, 
+                cluster_col, 
+                analysis_type, 
+                target_col, 
+                group_by_col, 
+                selected_clusters
+            )
+            
+            if result is not None:
+                st.success(message)
+                st.subheader("Analysis Results")
+                st.dataframe(result)
+                
+                # Download results
+                csv_results = result.to_csv().encode('utf-8')
+                st.download_button(
+                    label="📥 Download Analysis Results",
+                    data=csv_results,
+                    file_name=f"analysis_{analysis_type}.csv",
+                    mime="text/csv"
+                )
+                
+                # Store results in session state
+                st.session_state['analysis_results'] = result
+                st.session_state['analysis_type'] = analysis_type
+                
+            else:
+                st.error(f"Analysis failed: {message}")
+    
+    # Quick insights section
+    if 'analysis_results' in st.session_state:
+        st.subheader("💡 Quick Insights")
+        result = st.session_state['analysis_results']
+        analysis_type = st.session_state['analysis_type']
+        
+        if analysis_type == "cluster_summary":
+            st.write(f"**Total Clusters Analyzed:** {len(result)}")
+            if 'Total_Records' in result.columns:
+                st.write(f"**Largest Cluster:** {result['Total_Records'].idxmax()} ({result['Total_Records'].max()} records)")
+            
+            if target_col and f'{target_col}_Total' in result.columns:
+                st.write(f"**Highest {target_col} Total:** {result[f'{target_col}_Total'].idxmax()} ({result[f'{target_col}_Total'].max():,.2f})")
+        
+        elif analysis_type == "top_clusters":
+            st.write(f"**Top Performing Cluster:** {result.index[0]} ({result.iloc[0, 0]:,.2f})")
+            st.write(f"**Bottom Performing Cluster:** {result.index[-1]} ({result.iloc[-1, 0]:,.2f})")
+
+    # DATA GROUPING SECTION
+    st.subheader("📊 Data Grouping")
+    st.write("Group your data by categorical columns to analyze patterns:")
+    
+    # Grouping interface
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Multiselect for grouping columns
+        group_by_cols = st.multiselect(
+            "Select columns to group by:",
+            categorical_cols,
+            default=[]
+        )
+    
+    with col2:
+        # Select numeric column to aggregate (optional)
+        agg_col = st.selectbox(
+            "Select numeric column to aggregate (optional):",
+            ["None"] + numeric_cols,
+            key="agg_col_select"
+        )
+        
+        # Select aggregation function
+        agg_func = st.selectbox(
+            "Select aggregation function:",
+            ["count", "sum", "mean", "median", "min", "max"],
+            disabled=(agg_col == "None"),
+            key="agg_func_select"
+        )
+    
+    # Prepare aggregation rules
+    aggregation_rules = None
+    if agg_col != "None":
+        aggregation_rules = {agg_col: agg_func}
+    
+    if st.button("🔢 Group Data", key="group_data_button"):
+        if not group_by_cols:
+            st.warning("Please select at least one column to group by")
+        else:
+            with st.spinner("Grouping data..."):
+                grouped_df = group_data(df_clustered, group_by_cols, aggregation_rules)
+                
+                st.subheader("Grouped Data Results")
+                st.dataframe(grouped_df.head(50))
+                
+                # Download results
+                csv_grouped = grouped_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Grouped Data",
+                    data=csv_grouped,
+                    file_name="grouped_data.csv",
+                    mime="text/csv"
+                )
+                
+                # Store results in session state
+                st.session_state['grouped_data'] = grouped_df
+                st.session_state['group_by_cols'] = group_by_cols
+                
+                # Show quick summary
+                st.subheader("💡 Quick Insights")
+                st.write(f"Data grouped by: {', '.join(group_by_cols)}")
+                if agg_col != "None":
+                    st.write(f"Aggregated column: {agg_col} ({agg_func})")
+                    st.write(f"Total {agg_col}: {grouped_df[agg_col].sum():,.2f}")
+                st.write(f"Number of groups: {len(grouped_df)}")

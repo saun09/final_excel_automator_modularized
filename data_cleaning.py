@@ -116,7 +116,7 @@ def drop_unwanted_columns(df):
     # Define columns to drop (in any case)
     unwanted = [
         'CUSH', 'MODE OF SHIPMENT', 'AG', 'Total_Duty_Paid', 'Supplier_Address',
-        'IEC', 'Importer_Name', 'Importer_Address', 'Importer_PIN',
+        'IEC', 'Importer_Address', 'Importer_PIN',
         'Importer_Phone', 'Importer_mail', 'Importer_Contact_Person_1',
         'Importer_Contact_Person_2', 'IEC_Date_of_Establishment'
     ]
@@ -268,7 +268,7 @@ import requests
 import pandas as pd
 
 base_url = "https://marketdata.tradermade.com/api/v1/convert"
-api_key = "-eRFVM6ugO_vKeHx0_Yu"
+api_key = "laC15V4w7FQgzxnfEUo5"
 
 def convert_currency(amount, from_currency, to_currency):
     if from_currency == to_currency:
