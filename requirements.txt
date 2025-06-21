@@ -1,0 +1,14 @@
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+plotly
+openpyxl
+xlsxwriter
+statsmodels
+prophet
+python-dateutil
+calendar
+rapidfuzz
+requests
