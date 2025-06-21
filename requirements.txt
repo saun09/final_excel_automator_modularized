@@ -9,6 +9,5 @@ xlsxwriter
 statsmodels
 prophet
 python-dateutil
-calendar
 rapidfuzz
 requests
