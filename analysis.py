@@ -161,55 +161,125 @@ def filter_trade_data(df, trade_type_col, country_col, supplier_col,
     return df
 
 import pandas as pd
+import numpy as np
 
 def perform_trade_analysis(df, product_col, quantity_col, value_col, importer_col, supplier_col):
-    analysis = {}
+    results = {}
 
-    if df.empty:
-        return {"error": "No data available for analysis."}
+    try:
+        # 1. Which importer country is importing the most from a particular supplier country for the selected product?
+        most_importing = df.groupby([importer_col, supplier_col])[value_col].sum().reset_index()
+        most_importing = most_importing.sort_values(by=value_col, ascending=False).head(10)
+        results["1. Top Importer-Supplier Combinations"] = most_importing
 
-    # Top products by quantity
-    product_summary = (
-        df.groupby(product_col)[quantity_col]
-        .sum()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    analysis["Top Products by Quantity"] = product_summary
+        # 2. What are the top countries exporting for a given product?
+        top_exporting = df.groupby(supplier_col)[value_col].sum().reset_index()
+        top_exporting = top_exporting.sort_values(by=value_col, ascending=False).head(10)
+        results["2. Top Exporting Countries"] = top_exporting
 
-    # Top suppliers
-    supplier_summary = (
-        df.groupby(supplier_col)[quantity_col]
-        .sum()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    analysis["Top Suppliers"] = supplier_summary
+        # 3. What are the top importing cities/states for a given product from a supplier country?
+        top_importing_cities = df.groupby([importer_col, supplier_col])[value_col].sum().reset_index()
+        top_importing_cities = top_importing_cities.sort_values(by=value_col, ascending=False).head(10)
+        results["3. Top Importing Cities/States by Supplier"] = top_importing_cities
 
-    # Top importers
-    importer_summary = (
-        df.groupby(importer_col)[quantity_col]
-        .sum()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    analysis["Top Importers"] = importer_summary
+        # 4. Is there any country that dominates in export of selected product?
+        dominant_export = top_exporting.copy()
+        total_export = dominant_export[value_col].sum()
+        dominant_export["% Share"] = (dominant_export[value_col] / total_export) * 100
+        results["4. Export Dominance Share"] = dominant_export
 
-    # Unit price (value/quantity) by product
-    df["unit_price"] = df[value_col] / df[quantity_col]
-    unit_price_summary = (
-        df.groupby(product_col)["unit_price"]
-        .mean()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    analysis["Average Unit Price by Product"] = unit_price_summary
+        # 5. Which supplier country is sending the highest value of the product to particular importer country/city?
+        top_supplier_to_importer = df.groupby([supplier_col, importer_col])[value_col].sum().reset_index()
+        top_supplier_to_importer = top_supplier_to_importer.sort_values(by=value_col, ascending=False).head(10)
+        results["5. Highest Supplier to Importer Values"] = top_supplier_to_importer
 
-    return analysis
+        # 6. Has the trade value for the selected HSCode+Item increased or decreased over time?
+        if "year_extracted" in df.columns:
+            time_col = "year_extracted"
+        elif "year" in df.columns:
+            time_col = "year"
+        elif "Month" in df.columns:
+            df["year_temp"] = pd.to_datetime(df["Month"], errors="coerce").dt.year
+            time_col = "year_temp"
+        else:
+            time_col = None
+
+        if time_col:
+            trend_df = df.groupby(time_col)[value_col].sum().reset_index()
+            trend_df = trend_df.sort_values(by=time_col)
+            trend_df["Change"] = trend_df[value_col].diff()
+            trend_df["% Change"] = trend_df[value_col].pct_change() * 100
+            results["6. Trade Value Trend Over Time"] = trend_df
+
+        # 7. Which supplier country is giving the lowest/highest average value per unit to an importer country?
+        df["Unit_Value"] = df[value_col] / df[quantity_col].replace(0, np.nan)
+        avg_unit_value = df.groupby([supplier_col, importer_col])["Unit_Value"].mean().reset_index()
+        highest_avg = avg_unit_value.sort_values(by="Unit_Value", ascending=False).head(5)
+        lowest_avg = avg_unit_value.sort_values(by="Unit_Value", ascending=True).head(5)
+        results["7A. Highest Avg Value per Unit"] = highest_avg
+        results["7B. Lowest Avg Value per Unit"] = lowest_avg
+
+        # 8. Heatmap: For selected item+HSCode, which importer/supplier pairs show highest trade value
+        heatmap_data = df.groupby([importer_col, supplier_col])[value_col].sum().reset_index()
+        heatmap_pivot = heatmap_data.pivot(index=importer_col, columns=supplier_col, values=value_col).fillna(0)
+        results["8. Importer-Supplier Heatmap Data"] = heatmap_pivot
+
+    except Exception as e:
+        results["error"] = f"Trade analysis failed: {str(e)}"
+
+    return results
+
+
+def analyze_trend(df, trade_type, product_name, selected_years):
+    """
+    Analyze trend in trade value for a selected product across years.
+    """
+    try:
+        if "item_description" not in df.columns or "cth_hscode" not in df.columns:
+            return ""
+
+        if "year_extracted" in df.columns:
+            year_col = "year_extracted"
+        elif "year" in df.columns:
+            year_col = "year"
+        elif "Month" in df.columns:
+            df["year_temp"] = pd.to_datetime(df["Month"], errors="coerce").dt.year
+            year_col = "year_temp"
+        else:
+            return ""
+
+        item_col = "item_description"
+        trade_col = "Type"
+        value_col = df.select_dtypes(include="number").columns[0]
+
+        filtered = df[
+            (df[trade_col].str.lower() == trade_type.lower())
+            & (df[item_col].str.lower() == product_name.lower())
+            & (df[year_col].isin(selected_years))
+        ]
+
+        if filtered.empty or len(filtered[year_col].unique()) < 2:
+            return ""
+
+        trend = filtered.groupby(year_col)[value_col].sum().reset_index()
+        trend = trend.sort_values(by=year_col)
+
+        y1, y2 = trend.iloc[0][year_col], trend.iloc[-1][year_col]
+        v1, v2 = trend.iloc[0][value_col], trend.iloc[-1][value_col]
+
+        if v2 > v1:
+            status = "increased"
+        elif v2 < v1:
+            status = "decreased"
+        else:
+            status = "remained constant"
+
+        change = v2 - v1
+        percent = (change / v1) * 100 if v1 != 0 else 0
+        return f"From {y1} to {y2}, the trade value has **{status}** from **{v1:,.0f}** to **{v2:,.0f}** (change: {percent:.2f}%)."
+
+    except Exception as e:
+        return f"Trend analysis failed: {e}"
 
 
 
