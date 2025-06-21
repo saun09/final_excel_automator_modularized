@@ -319,7 +319,7 @@ if 'df_clustered' in st.session_state:
             importer_col = importer_country_col
             supplier_col = supplier_country_col
 
-            if st.button("" Run Full Trade Analysis"):
+            if st.button("Run Full Trade Analysis"):
                 insights = perform_trade_analysis(
                     df_filtered,
                     product_col=product_col,
